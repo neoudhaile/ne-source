@@ -1,4 +1,4 @@
-import type { RunRecord, Stats, Config, StatusResponse, PipelineEvent } from './types'
+import type { RunRecord, Stats, Config, StatusResponse, PipelineEvent, CsvUploadResponse } from './types'
 
 export async function triggerRun(): Promise<{ run_id: number }> {
   const res = await fetch('/api/runs', { method: 'POST' })
@@ -18,6 +18,18 @@ export async function getStats(): Promise<Stats> {
 
 export async function getStatus(): Promise<StatusResponse> {
   const res = await fetch('/api/status')
+  return res.json()
+}
+
+export async function pauseRun(): Promise<StatusResponse> {
+  const res = await fetch('/api/runs/pause', { method: 'POST' })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function resumeRun(): Promise<StatusResponse> {
+  const res = await fetch('/api/runs/resume', { method: 'POST' })
+  if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
@@ -44,11 +56,24 @@ export async function updateConfig(payload: {
 
 export async function getLeads(limit = 50, offset = 0): Promise<Record<string, unknown>[]> {
   const res = await fetch(`/api/leads?limit=${limit}&offset=${offset}`)
+  if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
 export async function getLead(id: number): Promise<Record<string, unknown>> {
   const res = await fetch(`/api/leads/${id}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function uploadCsv(file: File): Promise<CsvUploadResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch('/api/upload-csv', { method: 'POST', body: form })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text)
+  }
   return res.json()
 }
 
@@ -59,4 +84,8 @@ export function openRunSocket(runId: number, onEvent: (e: PipelineEvent) => void
     if (event.type !== 'ping') onEvent(event)
   }
   return ws
+}
+
+export function downloadTier1Export(runId: number) {
+  window.open(`/api/runs/${runId}/tier1-export`, '_blank')
 }

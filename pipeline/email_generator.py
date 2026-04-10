@@ -1,5 +1,9 @@
 """
-AI email generation — Claude produces a unique subject + body per lead.
+AI email generation — fixed template + Claude-generated specific observation.
+
+The email body is a fixed template written by Rigel. Claude's only job is to
+write one short "specific observation" sentence about the company, drawn from
+enriched data. The vertical thesis comes from vertical_theses.py (no AI needed).
 
 Uses the Anthropic SDK directly (not x402/Orthogonal).
 """
@@ -9,6 +13,7 @@ import anthropic
 from dotenv import load_dotenv
 
 from pipeline.db import get_lead, update_lead
+from pipeline.vertical_theses import get_thesis
 
 load_dotenv()
 
@@ -24,16 +29,48 @@ def generate_email(lead_id: int) -> dict:
     if not lead:
         return {'cost': 0.0}
 
-    prompt = _build_prompt(lead)
+    owner_first = (lead.get('owner_name') or 'there').split()[0]
+    company = lead.get('company') or 'your company'
+    vertical = lead.get('industry') or 'service'
+    thesis = get_thesis(vertical)
+
+    # If no thesis match, ask Claude to generate the thesis too
+    prompt = _build_prompt(lead, thesis_provided=thesis is not None)
 
     response = client.messages.create(
         model='claude-haiku-4-5-20251001',
-        max_tokens=500,
+        max_tokens=250,
         messages=[{'role': 'user', 'content': prompt}],
     )
 
     text = response.content[0].text
-    subject, body = _parse_response(text)
+    fields = _parse_response(text)
+
+    # Use stored thesis or Claude-generated one
+    final_thesis = thesis or fields.get('vertical_thesis', '')
+
+    subject = f"{company} \u2014 Potential Partnership Conversation"
+
+    body = (
+        f"Hi {owner_first},\n\n"
+        f"I came across {company} while researching {vertical} "
+        f"in Southern California.\n\n"
+        f"My name is Rigel Broeren. I run Broeren & Co. Holdings, a "
+        f"Southern California holding company focused on acquiring and "
+        f"operating {vertical} businesses for the long term. We're not a "
+        f"private equity fund, there's no outside investor with a five-year "
+        f"exit clock pushing decisions. We're specifically focused on "
+        f"{vertical} because {final_thesis}\n\n"
+        f"What we're looking for is straightforward: businesses where the "
+        f"owner has built something worth preserving. When we acquire a "
+        f"company, the team stays, the name stays, and the owner has a "
+        f"real say in how the transition happens \u2014 including staying "
+        f"involved if that's what they want.\n\n"
+        f"What stood out to me about {company} specifically: "
+        f"{fields.get('specific_observation', '')}\n\n"
+        f"I'd love to hear the story behind what you've built \u2014 would you "
+        f"be open to a 20 minute call?"
+    )
 
     update_lead(lead_id, {
         'generated_subject': subject,
@@ -53,75 +90,78 @@ def _fmt(val, fallback='Not available'):
     return str(val)
 
 
-def _build_prompt(lead: dict) -> str:
-    return f"""COMPANY DATA:
+def _build_prompt(lead: dict, thesis_provided: bool = True) -> str:
+    """
+    Build the prompt for Claude. If we have a matching vertical thesis,
+    Claude only needs to write the specific_observation. If not, Claude
+    also writes a vertical_thesis.
+    """
+    data_block = f"""COMPANY DATA:
 - Company name: {_fmt(lead.get('company'))}
 - Industry: {_fmt(lead.get('industry'))}
-- Address: {_fmt(lead.get('address'))}
-- City: {_fmt(lead.get('city'))}, {_fmt(lead.get('state'))} {_fmt(lead.get('zipcode'), '')}
+- City: {_fmt(lead.get('city'))}, {_fmt(lead.get('state'))}
 - Website: {_fmt(lead.get('website'))}
-- Google Maps: {_fmt(lead.get('google_maps_url'))}
 - Google rating: {_fmt(lead.get('rating'))} ({_fmt(lead.get('review_count'))} reviews)
 - Ownership type: {_fmt(lead.get('ownership_type'))}
-- Distance from LA: {_fmt(lead.get('distance_miles'))} miles
-
-OWNER / CONTACT:
-- Owner name: {_fmt(lead.get('owner_name'))}
-- Owner title: {_fmt(lead.get('owner_title'))}
-- Owner email: {_fmt(lead.get('owner_email'))}
-- Owner phone: {_fmt(lead.get('owner_phone'))}
-- Owner LinkedIn: {_fmt(lead.get('owner_linkedin'))}
-
-TEAM:
-- Employee count: {_fmt(lead.get('employee_count'))}
-- Key staff: {_fmt(lead.get('key_staff'))}
-
-BUSINESS DETAIL:
 - Year established: {_fmt(lead.get('year_established'))}
 - Services offered: {_fmt(lead.get('services_offered'))}
 - Company description: {_fmt(lead.get('company_description'))}
-- Revenue estimate: {_fmt(lead.get('revenue_estimate'))}
 - Certifications: {_fmt(lead.get('certifications'))}
-
-REPUTATION:
+- Employee count: {_fmt(lead.get('employee_count'))}
 - Review highlights: {_fmt(lead.get('review_summary'))}
-- Facebook: {_fmt(lead.get('facebook_url'))}
-- Yelp: {_fmt(lead.get('yelp_url'))}
+- Revenue estimate: {_fmt(lead.get('revenue_estimate'))}"""
 
-CONTEXT:
-Broeren Haile Holdings is an acquisition firm looking to acquire \
-established service businesses in the LA metro area. We want to \
-reach out to {_fmt(lead.get('owner_name'), 'the owner')} to explore whether they'd be open to \
-a conversation about a potential acquisition or partnership.
+    if thesis_provided:
+        return f"""{data_block}
 
-INSTRUCTIONS:
-Write a short, warm, personalized email (3-5 sentences max) from \
-our team to {_fmt(lead.get('owner_name'), 'the owner')}. Reference specific details about their \
-business that show we've done our research. Keep the tone \
-conversational — not salesy. End with a soft ask for a brief call. \
-Do not use generic filler. Every sentence should be specific to \
-this company. Use only data provided above — do not invent facts.
+TASK:
+Write one sentence (2-3 lines max) explaining what specifically stood out \
+about this company. Reference concrete details from the data above — a \
+high rating, years in business, specific services, certifications, customer \
+sentiment, or anything else that shows genuine familiarity. Do NOT use \
+generic praise. Every detail must come from the data provided.
+
+Output format (just the observation, no label):
+SPECIFIC_OBSERVATION: <your sentence>"""
+    else:
+        return f"""{data_block}
+
+TASK:
+Write two things:
+
+1. VERTICAL_THESIS — one paragraph (3-4 sentences) explaining why an \
+acquisition firm focused on long-term ownership would be interested in \
+the {_fmt(lead.get('industry'))} vertical specifically. Talk about the \
+demand dynamics, customer loyalty, and market position of established \
+independents in this space. Conversational tone, no jargon.
+
+2. SPECIFIC_OBSERVATION — one sentence (2-3 lines max) explaining what \
+specifically stood out about this company. Reference concrete details from \
+the data above. Do NOT use generic praise.
 
 Output format:
-SUBJECT: <subject line>
-BODY: <email body>"""
+VERTICAL_THESIS: <your paragraph>
+SPECIFIC_OBSERVATION: <your sentence>"""
 
 
-def _parse_response(text: str) -> tuple[str, str]:
-    """Extract SUBJECT: and BODY: from Claude's response."""
-    subject = ''
-    body = ''
+def _parse_response(text: str) -> dict:
+    """Extract labeled fields from Claude's response."""
+    fields = {}
+    current_key = None
 
-    lines = text.strip().split('\n')
-    in_body = False
+    for line in text.strip().split('\n'):
+        upper = line.strip().upper()
+        if upper.startswith('SPECIFIC_OBSERVATION:'):
+            current_key = 'specific_observation'
+            fields[current_key] = line.split(':', 1)[1].strip()
+        elif upper.startswith('VERTICAL_THESIS:'):
+            current_key = 'vertical_thesis'
+            fields[current_key] = line.split(':', 1)[1].strip()
+        elif current_key:
+            fields[current_key] += '\n' + line
 
-    for line in lines:
-        if line.strip().upper().startswith('SUBJECT:'):
-            subject = line.split(':', 1)[1].strip()
-        elif line.strip().upper().startswith('BODY:'):
-            body = line.split(':', 1)[1].strip()
-            in_body = True
-        elif in_body:
-            body += '\n' + line
+    # Clean up
+    for key in fields:
+        fields[key] = fields[key].strip()
 
-    return subject.strip(), body.strip()
+    return fields

@@ -38,6 +38,7 @@ class StatsResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     is_running: bool
+    is_paused: bool = False
     active_run_id: Optional[int] = None
     next_run_at: Optional[str] = None
 

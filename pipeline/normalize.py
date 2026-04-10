@@ -79,6 +79,9 @@ def extract_place_id(raw):
 # ---------------------------------------------------------------------------
 
 def normalize_lead(record, industry):
+    if record.get('source') == 'google_places':
+        return normalize_google_place(record, industry)
+
     # Openmart wraps fields under 'content'
     raw = record.get('content') or record
 
@@ -121,4 +124,82 @@ def normalize_lead(record, industry):
         'status':          'new',
         'source':          'openmart',
         'raw_data':        json.dumps(record),
+    }
+
+
+def normalize_google_place(record, industry):
+    details = record.get('details') or record.get('place') or {}
+    location = details.get('location') or {}
+    display_name = details.get('displayName') or {}
+    primary_type = details.get('primaryTypeDisplayName') or {}
+    address = details.get('formattedAddress') or ''
+    city = None
+    state = None
+    zipcode = None
+
+    if address:
+        parts = [part.strip() for part in address.split(',')]
+        if len(parts) >= 3:
+            city = parts[-3]
+            state_zip = parts[-2].split()
+            if state_zip:
+                state = state_zip[0]
+            if len(state_zip) > 1:
+                zipcode = state_zip[1]
+
+    raw = {
+        'company': (display_name.get('text') or '').strip(),
+        'address': address,
+        'city': city,
+        'state': state or 'CA',
+        'zipcode': zipcode,
+        'website': details.get('websiteUri'),
+        'phone': details.get('nationalPhoneNumber'),
+        'industry': industry,
+        'google_place_id': details.get('id'),
+        'rating': details.get('rating'),
+        'review_count': details.get('userRatingCount'),
+        'latitude': location.get('latitude'),
+        'longitude': location.get('longitude'),
+        'google_maps_url': details.get('googleMapsUri'),
+        'source': 'google_places',
+        'raw_data': json.dumps(record),
+        'primary_type': primary_type.get('text'),
+    }
+
+    in_target, dist_or_reason = is_socal_target({
+        'state': raw.get('state'),
+        'city': raw.get('city'),
+        'latitude': raw.get('latitude'),
+        'longitude': raw.get('longitude'),
+    })
+    if not in_target:
+        return None
+
+    if not raw['company'] or not raw['google_place_id']:
+        return None
+
+    return {
+        'company': raw['company'],
+        'owner_name': None,
+        'email': None,
+        'phone': raw['phone'],
+        'address': raw['address'],
+        'city': raw['city'],
+        'state': raw['state'],
+        'zipcode': raw['zipcode'],
+        'website': raw['website'],
+        'industry': raw['industry'],
+        'google_place_id': raw['google_place_id'],
+        'rating': raw['rating'],
+        'review_count': raw['review_count'],
+        'ownership_type': None,
+        'distance_miles': dist_or_reason if isinstance(dist_or_reason, float) else None,
+        'latitude': raw['latitude'],
+        'longitude': raw['longitude'],
+        'openmart_id': None,
+        'google_maps_url': raw['google_maps_url'],
+        'status': 'new',
+        'source': 'google_places',
+        'raw_data': raw['raw_data'],
     }

@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { Download, X } from 'lucide-react'
 import type { RunRecord } from '../types'
 
 function duration(run: RunRecord): string {
@@ -14,7 +14,15 @@ function StatusDot({ status }: { status: RunRecord['status'] }) {
   return <span className="inline-block w-2 h-2 rounded-full bg-red-400" />
 }
 
-export function RunHistoryDrawer({ runs, onClose }: { runs: RunRecord[]; onClose: () => void }) {
+export function RunHistoryDrawer({
+  runs,
+  onClose,
+  onDownloadTier1,
+}: {
+  runs: RunRecord[]
+  onClose: () => void
+  onDownloadTier1: (runId: number) => void
+}) {
   return (
     <>
       <div className="fixed inset-0 bg-black/50 z-40" onClick={onClose} />
@@ -56,6 +64,15 @@ export function RunHistoryDrawer({ runs, onClose }: { runs: RunRecord[]; onClose
               </div>
               {run.error_message && (
                 <div className="text-red-400 text-xs">{run.error_message}</div>
+              )}
+              {run.status === 'completed' && (
+                <button
+                  onClick={() => onDownloadTier1(run.id)}
+                  className="mt-2 inline-flex items-center gap-1.5 text-xs text-gray-300 hover:text-white border border-gray-600 hover:border-gray-400 rounded px-2 py-1 transition-colors"
+                >
+                  <Download size={12} />
+                  Download Tier 1 Brief
+                </button>
               )}
             </div>
           ))}

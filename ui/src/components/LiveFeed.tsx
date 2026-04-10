@@ -3,7 +3,29 @@ import type { PipelineEvent } from '../types'
 function formatEvent(e: PipelineEvent): { text: string; color: string } | null {
   switch (e.type) {
     case 'start':
+      if (e.total_queries === 0 && e.industries?.[0] === 'csv_import') {
+        return { text: 'CSV import pipeline started', color: 'text-blue-400' }
+      }
       return { text: `Pipeline started — ${e.industries?.length} industries × ${e.cities?.length} cities (${e.total_queries} queries)`, color: 'text-blue-400' }
+    case 'csv_imported':
+      return { text: `CSV import ready — ${e.count} leads queued for enrichment`, color: 'text-blue-400' }
+    case 'tier_start':
+      return { text: `Tiering ${e.count} leads...`, color: 'text-blue-400' }
+    case 'tier_lead': {
+      const label = e.tier === 'tier_1' ? 'Tier 1' : e.tier === 'tier_2' ? 'Tier 2' : e.tier === 'tier_3' ? 'Tier 3' : 'Hard Remove'
+      return { text: `  ${e.company} → ${label}${e.tier_reason ? ` · ${e.tier_reason}` : ''}`, color: e.tier === 'hard_remove' ? 'text-red-400' : 'text-cyan-400' }
+    }
+    case 'lead_removed':
+      return { text: `  Removed ${e.company}${e.tier_reason ? ` · ${e.tier_reason}` : ''}`, color: 'text-red-400' }
+    case 'tier_skip':
+      return { text: `  Skipping ${e.company}${e.tier_reason ? ` · ${e.tier_reason}` : ''}`, color: 'text-yellow-400' }
+    case 'tier_done':
+      return { text: `Tiering complete — ${e.kept} kept, ${e.removed} removed`, color: 'text-green-300' }
+    case 'csv_batch_done':
+      return {
+        text: `CSV insert batch: ${e.processed}/${e.total_pending} processed · ${e.inserted_so_far} inserted · ${e.skipped_so_far} skipped`,
+        color: 'text-gray-500',
+      }
     case 'search':
       return { text: `Searching: ${e.query} in ${e.city} (${e.index}/${e.total})`, color: 'text-gray-400' }
     case 'results':
@@ -44,6 +66,20 @@ function formatEvent(e: PipelineEvent): { text: string; color: string } | null {
       return { text: `Search cap reached — ${e.count} leads inserted`, color: 'text-yellow-400' }
     case 'enrich_start':
       return { text: `Enriching ${e.count} leads...`, color: 'text-blue-400' }
+    case 'enrich_step_start':
+      return { text: `  ⟳ ${e.company} → ${e.step}`, color: 'text-gray-500' }
+    case 'enrich_step_done':
+      return {
+        text: `  ✓ ${e.company} → ${e.step} (${e.elapsed}s, $${(e.cost as number)?.toFixed(3) ?? '0'})${(e.fields_filled as string[])?.length ? ' — ' + (e.fields_filled as string[]).join(', ') : ''}`,
+        color: 'text-cyan-400',
+      }
+    case 'enrich_step_skip':
+      return {
+        text: `  · ${e.company} → ${e.step}${e.detail ? ` — ${e.detail}` : ''}`,
+        color: 'text-gray-500',
+      }
+    case 'enrich_step_error':
+      return { text: `  ✗ ${e.company} → ${e.step} (${e.elapsed}s): ${e.error}`, color: 'text-red-400' }
     case 'enrich_lead':
       return { text: `  Enriched ${e.company} (${e.index}/${e.total}) — ${e.sources?.join(', ') || 'no sources'}`, color: 'text-cyan-400' }
     case 'enrich_done':
@@ -58,6 +94,10 @@ function formatEvent(e: PipelineEvent): { text: string; color: string } | null {
       return { text: `Email generation complete — ${e.count} emails`, color: 'text-green-300' }
     case 'generate_error':
       return { text: `Email generation error: ${e.message}`, color: 'text-red-400' }
+    case 'paused':
+      return { text: 'Run paused', color: 'text-yellow-400' }
+    case 'resumed':
+      return { text: 'Run resumed', color: 'text-blue-400' }
     case 'error':
       return { text: `Error: ${e.message}`, color: 'text-red-400' }
     default:

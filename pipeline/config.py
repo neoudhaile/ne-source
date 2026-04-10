@@ -1,28 +1,34 @@
+SEARCH_PROVIDER = 'openmart'
+
+ENRICH_CONCURRENCY = 4
+GENERATE_CONCURRENCY = 4
+ENABLE_REVIEW_SCRAPE = True
+FAST_TIMEOUT = 20
+SLOW_TIMEOUT = 35
+SCRAPE_DIRECT_TIMEOUT = 12
+SCRAPE_ZYTE_TIMEOUT = 30
+SCRAPE_MIN_TEXT_LENGTH = 500
+SCRAPE_ENABLE_ZYTE_FALLBACK = True
+SCRAPE_BLOCK_PATTERNS = [
+    'access denied',
+    'forbidden',
+    'captcha',
+    'verify you are human',
+    'enable javascript',
+    'cloudflare',
+]
+
 INDUSTRIES = [
-    'HVAC repair',
-    'plumbing',
-    'electrical contractor',
-    'roofing',
-    'pest control',
-    'landscaping',
-    'pool service',
-    'auto repair',
+    'Car Wash',
 ]
 
 CITIES = [
     'Los Angeles, CA',
-    'Long Beach, CA',
-    'Pasadena, CA',
-    'Burbank, CA',
-    'Glendale, CA',
-    'Torrance, CA',
-    'Santa Monica, CA',
-    'Anaheim, CA',
 ]
 
 MIN_REVIEWS      = 5
 MIN_RATING       = 3.5
-MAX_LEADS_PER_RUN = 10
+MAX_LEADS_PER_RUN = 1
 
 LA_LAT           = 34.0522
 LA_LNG           = -118.2437

@@ -18,7 +18,6 @@ interface Lead {
   distance_miles: number | null
   website: string | null
   google_maps_url: string | null
-  owner_title: string | null
   owner_phone: string | null
   owner_linkedin: string | null
   employee_count: number | null
@@ -97,7 +96,6 @@ function LeadCard({ lead }: { lead: Lead }) {
             <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Enriched Contact</div>
             <FieldRow label="Owner Email" value={lead.owner_email} source={meta.owner_email?.source} />
             <FieldRow label="Owner Phone" value={lead.owner_phone} source={meta.owner_phone?.source} />
-            <FieldRow label="Owner Title" value={lead.owner_title} source={meta.owner_title?.source} />
             <FieldRow label="Owner LinkedIn" value={lead.owner_linkedin} source={meta.owner_linkedin?.source} />
             <FieldRow label="Employee Count" value={lead.employee_count} source={meta.employee_count?.source} />
             <FieldRow label="Key Staff" value={lead.key_staff} source={meta.key_staff?.source} />
@@ -140,13 +138,19 @@ function LeadCard({ lead }: { lead: Lead }) {
 export function LeadViewer({ onClose }: { onClose: () => void }) {
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [offset, setOffset] = useState(0)
   const PAGE_SIZE = 50
 
   useEffect(() => {
     setLoading(true)
+    setError(null)
     getLeads(PAGE_SIZE, offset)
       .then(data => setLeads(data as Lead[]))
+      .catch(err => {
+        setLeads([])
+        setError(err instanceof Error ? err.message : 'Failed to load leads')
+      })
       .finally(() => setLoading(false))
   }, [offset])
 
@@ -161,6 +165,7 @@ export function LeadViewer({ onClose }: { onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {loading && <p className="text-gray-500 text-sm text-center mt-8">Loading...</p>}
+          {!loading && error && <p className="text-red-400 text-sm text-center mt-8">{error}</p>}
           {!loading && leads.length === 0 && <p className="text-gray-600 text-sm text-center mt-8">No leads yet</p>}
           {leads.map(lead => <LeadCard key={lead.id} lead={lead} />)}
         </div>

@@ -1,14 +1,98 @@
 import time
-from pipeline.config import INDUSTRIES, CITIES, MIN_REVIEWS, MIN_RATING, MAX_LEADS_PER_RUN
-from pipeline.db import get_connection, insert_lead, count_leads, get_lead, update_run_cost
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+
+from pipeline.config import (
+    CITIES,
+    ENRICH_CONCURRENCY,
+    GENERATE_CONCURRENCY,
+    INDUSTRIES,
+    MAX_LEADS_PER_RUN,
+    MIN_RATING,
+    MIN_REVIEWS,
+)
+from pipeline.db import (
+    get_connection,
+    insert_lead,
+    count_leads,
+    get_leads_by_ids,
+    update_run_cost,
+)
 from pipeline.scraper import search_businesses, API_PAGE_SIZE
 from pipeline.normalize import normalize_lead
 from pipeline.enrichment import enrich_lead
-from pipeline.email_generator import generate_email
-from pipeline.instantly import push_leads
+from pipeline.tiering import tier_leads
 
 
-def run_pipeline(emit=None, run_id=None):
+def _checkpoint(wait_if_paused):
+    if wait_if_paused is not None:
+        wait_if_paused()
+
+
+def _emit_non_tier1_skips(leads, emit):
+    tier1_ids = []
+    for lead in leads:
+        if lead.get('tier') == 'tier_1':
+            tier1_ids.append(lead['id'])
+            continue
+        emit({
+            'type': 'tier_skip',
+            'lead_id': lead.get('id'),
+            'company': lead.get('company', ''),
+            'tier': lead.get('tier'),
+            'tier_reason': lead.get('tier_reason'),
+            'message': 'Skipping non-Tier 1 lead before enrichment.',
+        })
+    return tier1_ids
+
+
+def _run_stage_concurrently(
+    lead_ids,
+    worker_fn,
+    on_success,
+    on_error,
+    concurrency,
+    wait_if_paused=None,
+):
+    if not lead_ids:
+        return 0.0
+
+    total_cost = 0.0
+    completed = 0
+    lead_iter = iter(lead_ids)
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as stage_executor:
+        futures = {}
+
+        def submit_next():
+            _checkpoint(wait_if_paused)
+            try:
+                lead_id = next(lead_iter)
+            except StopIteration:
+                return False
+            futures[stage_executor.submit(worker_fn, lead_id)] = lead_id
+            return True
+
+        for _ in range(min(max(1, concurrency), len(lead_ids))):
+            if not submit_next():
+                break
+
+        while futures:
+            done, _ = wait(list(futures.keys()), return_when=FIRST_COMPLETED)
+            for future in done:
+                lead_id = futures.pop(future)
+                completed += 1
+                try:
+                    result = future.result()
+                    total_cost += float(result.get('cost', 0.0))
+                    on_success(lead_id, result, completed, len(lead_ids))
+                except Exception as e:
+                    on_error(lead_id, e, completed, len(lead_ids))
+                submit_next()
+
+    return total_cost
+
+
+def run_pipeline(emit=None, run_id=None, wait_if_paused=None):
     if emit is None:
         emit = lambda e: None
 
@@ -38,6 +122,7 @@ def run_pipeline(emit=None, run_id=None):
 
             # Paginate this query until exhausted or capped
             while True:
+                _checkpoint(wait_if_paused)
                 page_num += 1
 
                 emit({'type': 'search', 'query': industry, 'city': city,
@@ -64,6 +149,7 @@ def run_pipeline(emit=None, run_id=None):
                 batch_rejected = 0
 
                 for record in results:
+                    _checkpoint(wait_if_paused)
                     lead = normalize_lead(record, industry)
 
                     if lead is None:
@@ -71,14 +157,17 @@ def run_pipeline(emit=None, run_id=None):
                         batch_rejected += 1
                         continue
 
+                    if run_id is not None:
+                        lead['run_id'] = run_id
                     lead_id = insert_lead(conn, lead)
                     if lead_id is not None:
                         inserted_total += 1
                         batch_inserted += 1
                         inserted_ids.append(lead_id)
-                        inserted_leads.append(lead)
+                        inserted_leads.append({'id': lead_id, **lead})
                         emit({
                             'type': 'insert',
+                            'lead_id': lead_id,
                             'company': lead['company'],
                             'industry': industry,
                             'city': city,
@@ -113,61 +202,47 @@ def run_pipeline(emit=None, run_id=None):
                     break
                 cursor = next_cursor
 
+        # ── Tier stage ─────────────────────────────────────────────────────
+        tier_result = tier_leads(inserted_ids, emit=emit, wait_if_paused=wait_if_paused)
+        tiered_leads = get_leads_by_ids(tier_result['kept_ids'])
+        # Enrich all tiers, not just tier_1
+        # inserted_ids = _emit_non_tier1_skips(tiered_leads, emit)
+        inserted_ids = [lead['id'] for lead in tiered_leads]
+        inserted_leads = tiered_leads
+        inserted_total = len(inserted_ids)
+
         # ── Enrich stage ───────────────────────────────────────────────────
         total_cost = 0.0
 
         emit({'type': 'enrich_start', 'count': len(inserted_ids)})
-        for i, lead_id in enumerate(inserted_ids):
-            try:
-                result = enrich_lead(lead_id, emit=emit)
-                total_cost += result['cost']
-                emit({
-                    'type': 'enrich_lead',
-                    'index': i + 1,
-                    'total': len(inserted_ids),
-                    'company': inserted_leads[i].get('company', ''),
-                    'sources': list(result['sources'].keys()),
-                })
-            except Exception as e:
-                emit({'type': 'enrich_error', 'message': str(e), 'lead_id': lead_id})
-        emit({'type': 'enrich_done', 'count': len(inserted_ids)})
+        inserted_lead_map = {lead['id']: lead for lead in inserted_leads}
 
-        # ── Generate stage ─────────────────────────────────────────────────
-        emit({'type': 'generate_start', 'count': len(inserted_ids)})
-        for i, lead_id in enumerate(inserted_ids):
-            try:
-                result = generate_email(lead_id)
-                total_cost += result['cost']
-                emit({
-                    'type': 'generate_lead',
-                    'index': i + 1,
-                    'total': len(inserted_ids),
-                    'company': inserted_leads[i].get('company', ''),
-                })
-            except Exception as e:
-                emit({'type': 'generate_error', 'message': str(e), 'lead_id': lead_id})
-        emit({'type': 'generate_done', 'count': len(inserted_ids)})
+        total_cost += _run_stage_concurrently(
+            inserted_ids,
+            lambda lead_id: enrich_lead(lead_id, emit=emit),
+            lambda lead_id, result, completed, total: emit({
+                'type': 'enrich_lead',
+                'index': completed,
+                'total': total,
+                'lead_id': lead_id,
+                'company': (inserted_lead_map.get(lead_id) or {}).get('company', ''),
+                'sources': list(result['sources'].keys()),
+            }),
+            lambda lead_id, error, completed, total: emit({
+                'type': 'enrich_error',
+                'message': str(error),
+                'lead_id': lead_id,
+                'index': completed,
+                'total': total,
+            }),
+            ENRICH_CONCURRENCY,
+            wait_if_paused=wait_if_paused,
+        )
+        emit({'type': 'enrich_done', 'count': len(inserted_ids)})
 
         # Store cost on the run
         if run_id is not None:
             update_run_cost(run_id, total_cost)
-
-        # ── Outreach stage ─────────────────────────────────────────────────
-        # Re-read leads from DB to get enriched + generated data
-        leads_to_push = [get_lead(lid) for lid in inserted_ids]
-        leads_to_push = [l for l in leads_to_push if l and (l.get('generated_email') or l.get('email'))]
-
-        emit({'type': 'outreach_start', 'count': len(leads_to_push)})
-        try:
-            result = push_leads(leads_to_push)
-            emit({
-                'type':    'outreach_done',
-                'pushed':  result['pushed'],
-                'skipped': result['skipped'],
-                'failed':  result['failed'],
-            })
-        except Exception as e:
-            emit({'type': 'outreach_error', 'message': str(e)})
 
         total = count_leads(conn)
         emit({
@@ -184,6 +259,110 @@ def run_pipeline(emit=None, run_id=None):
         raise
     finally:
         conn.close()
+
+
+def run_csv_pipeline(lead_ids: list[int], emit=None, run_id=None, wait_if_paused=None):
+    """Run enrichment + email generation on pre-inserted CSV leads (skip search)."""
+    if emit is None:
+        emit = lambda e: None
+
+    total_cost = 0.0
+
+    emit({'type': 'start', 'industries': ['csv_import'], 'cities': [],
+          'total_queries': 0})
+
+    inserted_leads = get_leads_by_ids(lead_ids)
+    lead_map = {lead['id']: lead for lead in inserted_leads}
+
+    enrichable_fields = [
+        'google_maps_url', 'owner_email', 'owner_phone', 'owner_linkedin',
+        'employee_count', 'key_staff', 'year_established', 'services_offered',
+        'company_description', 'revenue_estimate', 'certifications',
+        'review_summary', 'facebook_url', 'yelp_url',
+    ]
+
+    for lead in inserted_leads:
+        meta = lead.get('enrichment_meta') or {}
+        field_values = {}
+        field_sources = {}
+        for field in enrichable_fields:
+            value = lead.get(field)
+            if value is None or value == '' or value == []:
+                continue
+            if isinstance(value, list):
+                field_values[field] = ', '.join(str(v) for v in value)
+            else:
+                field_values[field] = str(value)
+            field_sources[field] = (meta.get(field) or {}).get('source') or 'csv_import'
+
+        emit({
+            'type': 'insert',
+            'lead_id': lead.get('id'),
+            'company': lead.get('company', ''),
+            'industry': lead.get('industry', ''),
+            'city': lead.get('city', ''),
+            'distance_miles': lead.get('distance_miles'),
+            'ownership_type': lead.get('ownership_type'),
+            'field_values': field_values,
+            'field_sources': field_sources,
+            'generated_subject': lead.get('generated_subject'),
+            'generated_email': lead.get('generated_email'),
+        })
+
+    try:
+        tier_result = tier_leads(lead_ids, emit=emit, wait_if_paused=wait_if_paused)
+        tiered_leads = get_leads_by_ids(tier_result['kept_ids'])
+        # Enrich all tiers, not just tier_1
+        # lead_ids = _emit_non_tier1_skips(tiered_leads, emit)
+        lead_ids = [lead['id'] for lead in tiered_leads]
+        emit({'type': 'csv_imported', 'count': len(lead_ids)})
+        inserted_leads = tiered_leads
+        lead_map = {lead['id']: lead for lead in inserted_leads}
+
+        # ── Enrich stage ───────────────────────────────────────────────────
+        emit({'type': 'enrich_start', 'count': len(lead_ids)})
+        total_cost += _run_stage_concurrently(
+            lead_ids,
+            lambda lead_id: enrich_lead(lead_id, emit=emit),
+            lambda lead_id, result, completed, total: emit({
+                'type': 'enrich_lead',
+                'index': completed,
+                'total': total,
+                'lead_id': lead_id,
+                'company': (lead_map.get(lead_id) or {}).get('company', ''),
+                'sources': list(result['sources'].keys()),
+            }),
+            lambda lead_id, error, completed, total: emit({
+                'type': 'enrich_error',
+                'message': str(error),
+                'lead_id': lead_id,
+                'index': completed,
+                'total': total,
+            }),
+            ENRICH_CONCURRENCY,
+            wait_if_paused=wait_if_paused,
+        )
+        emit({'type': 'enrich_done', 'count': len(lead_ids)})
+
+        # Store cost on the run
+        if run_id is not None:
+            update_run_cost(run_id, total_cost)
+
+        conn = get_connection()
+        total = count_leads(conn)
+        conn.close()
+        emit({
+            'type': 'done',
+            'inserted': len(lead_ids),
+            'skipped_geo': 0,
+            'skipped_dupe': 0,
+            'total_leads': total,
+            'cost': total_cost,
+        })
+
+    except Exception as e:
+        emit({'type': 'error', 'message': str(e)})
+        raise
 
 
 if __name__ == '__main__':

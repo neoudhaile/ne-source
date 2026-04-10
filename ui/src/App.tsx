@@ -1,46 +1,57 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Menu, Play, Loader2, GripHorizontal } from 'lucide-react'
-import { triggerRun, getRuns, getStats, getStatus, getConfig } from './api'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Menu, Play, Pause, Loader2, GripHorizontal, Upload } from 'lucide-react'
+import { triggerRun, getRuns, getStatus, getConfig, uploadCsv, pauseRun, resumeRun, downloadTier1Export } from './api'
 import { usePipelineSocket } from './hooks/usePipelineSocket'
 import { useDragResize } from './hooks/useDragResize'
 import { PipelineGraph } from './components/PipelineGraph'
 import { LiveFeed } from './components/LiveFeed'
-import { LeadStats } from './components/LeadStats'
+import { LeadsTable } from './components/LeadsTable'
 import { RunHistoryDrawer } from './components/RunHistoryDrawer'
 import { ConfigPanel } from './components/ConfigPanel'
 import { LeadViewer } from './components/LeadViewer'
-import type { RunRecord, Stats, Config, StatusResponse, PipelineEvent } from './types'
+import type { RunRecord, Config, StatusResponse, PipelineEvent } from './types'
 
 export default function App() {
   const [runs, setRuns] = useState<RunRecord[]>([])
-  const [stats, setStats] = useState<Stats | null>(null)
   const [config, setConfig] = useState<Config | null>(null)
-  const [status, setStatus] = useState<StatusResponse>({ is_running: false, active_run_id: null, next_run_at: null })
+  const [status, setStatus] = useState<StatusResponse>({ is_running: false, is_paused: false, active_run_id: null, next_run_at: null })
   const [showHistory, setShowHistory] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
   const [showLeads, setShowLeads] = useState(false)
   const [triggering, setTriggering] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [togglingPause, setTogglingPause] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const { events, isRunning, connect } = usePipelineSocket()
+  const { events, isRunning, connect, activeRunIdRef } = usePipelineSocket()
   const { height: panelHeight, onMouseDown: onDragStart } = useDragResize(360, 80, 700)
 
   const refresh = useCallback(async () => {
-    const [r, s, st, cfg] = await Promise.all([getRuns(), getStats(), getStatus(), getConfig()])
+    const [r, st, cfg] = await Promise.all([getRuns(), getStatus(), getConfig()])
     setRuns(r)
-    setStats(s)
     setStatus(st)
     setConfig(cfg)
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
 
+  useEffect(() => {
+    if (!status.is_running || status.active_run_id == null) return
+    if (activeRunIdRef.current === status.active_run_id) return
+
+    connect(status.active_run_id, () => {
+      setStatus(s => ({ ...s, is_running: false, is_paused: false, active_run_id: null }))
+      refresh()
+    }, false)
+  }, [status.is_running, status.active_run_id, connect, refresh, activeRunIdRef])
+
   async function handleRun() {
     setTriggering(true)
     try {
       const { run_id } = await triggerRun()
-      setStatus(s => ({ ...s, is_running: true, active_run_id: run_id }))
+      setStatus(s => ({ ...s, is_running: true, is_paused: false, active_run_id: run_id }))
       connect(run_id, () => {
-        setStatus(s => ({ ...s, is_running: false, active_run_id: null }))
+        setStatus(s => ({ ...s, is_running: false, is_paused: false, active_run_id: null }))
         refresh()
       })
     } catch (e: unknown) {
@@ -50,7 +61,45 @@ export default function App() {
     }
   }
 
+  async function handleCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      const result = await uploadCsv(file)
+      if (result.run_id == null) {
+        await refresh()
+        alert(result.message || `CSV import complete: ${result.inserted} inserted, ${result.skipped} skipped.`)
+        return
+      }
+      // Connect to WebSocket for real-time enrichment progress
+      setStatus(s => ({ ...s, is_running: true, is_paused: false, active_run_id: result.run_id }))
+      connect(result.run_id, () => {
+        setStatus(s => ({ ...s, is_running: false, is_paused: false, active_run_id: null }))
+        refresh()
+      })
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'CSV upload failed')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  async function handlePauseToggle() {
+    setTogglingPause(true)
+    try {
+      const nextStatus = status.is_paused ? await resumeRun() : await pauseRun()
+      setStatus(nextStatus)
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to update run state')
+    } finally {
+      setTogglingPause(false)
+    }
+  }
+
   const running = isRunning || status.is_running
+  const paused = status.is_running && status.is_paused
   const progress = (() => {
     const last = [...events].reverse().find(e => e.type === 'progress' || e.type === 'search')
     if (!last) return null
@@ -58,6 +107,11 @@ export default function App() {
   })()
 
   function cadenceLabel() {
+    if (paused) return (
+      <span className="flex items-center gap-1.5 text-yellow-400 text-sm">
+        <span className="w-2 h-2 rounded-full bg-yellow-400 inline-block" /> Paused
+      </span>
+    )
     if (running) return (
       <span className="flex items-center gap-1.5 text-blue-400 text-sm">
         <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse inline-block" /> Running
@@ -81,10 +135,39 @@ export default function App() {
         </div>
         <div className="flex-1 flex justify-center">{cadenceLabel()}</div>
         <div className="flex items-center gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv"
+          onChange={handleCsvUpload}
+          className="hidden"
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center gap-1.5 text-gray-400 hover:text-white text-sm px-3 py-2 rounded-lg border border-gray-700 hover:border-gray-500 disabled:opacity-50 transition-colors"
+        >
+          {uploading
+            ? <><Loader2 size={14} className="animate-spin" /> Importing...</>
+            : <><Upload size={14} /> Upload CSV</>}
+        </button>
         <button
           onClick={() => setShowLeads(true)}
           className="text-gray-400 hover:text-white text-sm px-3 py-2 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors"
         >Leads</button>
+        {running && (
+          <button
+            onClick={handlePauseToggle}
+            disabled={togglingPause}
+            className="flex items-center gap-1.5 text-gray-400 hover:text-white text-sm px-3 py-2 rounded-lg border border-gray-700 hover:border-gray-500 disabled:opacity-50 transition-colors"
+          >
+            {togglingPause
+              ? <><Loader2 size={14} className="animate-spin" /> {paused ? 'Resuming...' : 'Pausing...'}</>
+              : paused
+                ? <><Play size={14} /> Resume</>
+                : <><Pause size={14} /> Pause</>}
+          </button>
+        )}
         <button
           onClick={handleRun}
           disabled={running || triggering}
@@ -126,8 +209,8 @@ export default function App() {
 
       {/* Bottom panel — resizable */}
       <div
-        className="flex-shrink-0 grid grid-cols-2 gap-4 px-6 pb-6"
-        style={{ height: panelHeight }}
+        className="flex-shrink-0 grid gap-4 px-6 pb-6"
+        style={{ height: panelHeight, gridTemplateColumns: '1fr 2fr' }}
       >
         <div className="flex flex-col min-h-0">
           <div className="text-xs text-gray-500 uppercase tracking-wide mb-2 font-semibold">Live Feed</div>
@@ -136,15 +219,21 @@ export default function App() {
           </div>
         </div>
         <div className="flex flex-col min-h-0">
-          <div className="text-xs text-gray-500 uppercase tracking-wide mb-2 font-semibold">Lead Stats</div>
-          <div className="flex-1 min-h-0 overflow-y-auto bg-gray-900 rounded-lg p-4">
-            <LeadStats stats={stats} />
+          <div className="text-xs text-gray-500 uppercase tracking-wide mb-2 font-semibold">Leads</div>
+          <div className="flex-1 min-h-0">
+            <LeadsTable events={events} />
           </div>
         </div>
       </div>
 
       {/* Overlays */}
-      {showHistory && <RunHistoryDrawer runs={runs} onClose={() => setShowHistory(false)} />}
+      {showHistory && (
+        <RunHistoryDrawer
+          runs={runs}
+          onClose={() => setShowHistory(false)}
+          onDownloadTier1={(runId) => downloadTier1Export(runId)}
+        />
+      )}
       {showConfig && config && (
         <ConfigPanel
           config={config}
@@ -153,6 +242,7 @@ export default function App() {
         />
       )}
       {showLeads && <LeadViewer onClose={() => setShowLeads(false)} />}
+
     </div>
   )
 }

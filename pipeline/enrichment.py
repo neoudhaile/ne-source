@@ -7,6 +7,7 @@ Each step only populates fields that are still empty after previous steps.
 
 import os
 import json
+import threading
 import time
 import requests
 import anthropic
@@ -74,13 +75,19 @@ HUNTER_RETRIES = 2
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
+_thread_local = threading.local()
+
 def _x402_session() -> requests.Session:
-    """Create a fresh x402-backed session per call to avoid thread-safety issues."""
+    """Return a thread-local x402-backed session (created once per thread)."""
+    session = getattr(_thread_local, 'x402_session', None)
+    if session is not None:
+        return session
     account = Account.from_key(os.getenv('PRIVATE_KEY'))
     client = x402ClientSync()
     client.register_v1('base', ExactEvmSchemeV1(signer=account))
     session = requests.Session()
     session.mount('https://', x402_http_adapter(client))
+    _thread_local.x402_session = session
     return session
 
 def _get_missing(lead: dict, enriched: dict) -> list[str]:
@@ -264,12 +271,12 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
     last_error = None
     for attempt in range(HUNTER_RETRIES + 1):
         try:
-            with _x402_session() as session:
-                resp = session.get(
-                    f'{ORTH_BASE}/hunter/v2/domain-search',
-                    params={'domain': domain, 'limit': 5},
-                    timeout=SLOW_TIMEOUT,
-                )
+            session = _x402_session()
+            resp = session.get(
+                f'{ORTH_BASE}/hunter/v2/domain-search',
+                params={'domain': domain, 'limit': 5},
+                timeout=SLOW_TIMEOUT,
+            )
             resp.raise_for_status()
             data = resp.json()
             emails = data.get('data', {}).get('emails', [])
@@ -314,12 +321,12 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
             last = ' '.join(owner_name.split(' ')[1:])
             if last:
                 payload['last_name'] = last
-        with _x402_session() as session:
-            resp = session.post(
-                f'{ORTH_BASE}/apollo/api/v1/people/match',
-                json=payload,
-                timeout=FAST_TIMEOUT,
-            )
+        session = _x402_session()
+        resp = session.post(
+            f'{ORTH_BASE}/apollo/api/v1/people/match',
+            json=payload,
+            timeout=FAST_TIMEOUT,
+        )
         resp.raise_for_status()
         data = resp.json()
         person = data.get('person') or {}
@@ -624,22 +631,96 @@ def _step_claude_failsafe(lead: dict, enriched: dict, meta: dict) -> float:
 
 # ── Main entry point ───────────────────────────────────────────────────────
 
-STEPS = [
-    ('claude_discovery', _step_claude_discovery),
-    ('google_places',  _step_google_places),
-    ('google_maps',    _step_google_maps),
-    ('hunter',         _step_hunter),
-    ('apollo',         _step_apollo),
-    ('scrape_website', _step_scrape_website),
-    ('scrape_reviews', _step_scrape_reviews),
-    ('company_fallback', _step_company_contact_fallback),
-    ('claude_failsafe', _step_claude_failsafe),
-]
+_STEP_FN_NAMES = {
+    'claude_discovery':  '_step_claude_discovery',
+    'google_places':     '_step_google_places',
+    'google_maps':       '_step_google_maps',
+    'hunter':            '_step_hunter',
+    'apollo':            '_step_apollo',
+    'scrape_website':    '_step_scrape_website',
+    'scrape_reviews':    '_step_scrape_reviews',
+    'company_fallback':  '_step_company_contact_fallback',
+    'claude_failsafe':   '_step_claude_failsafe',
+}
+
+PHASE_1 = ['claude_discovery', 'google_places', 'google_maps']
+PHASE_2 = ['hunter', 'apollo', 'scrape_website']
+PHASE_3 = ['scrape_reviews', 'company_fallback', 'claude_failsafe']
+
+# Backward compat
+STEPS = [(k, globals()[_STEP_FN_NAMES[k]]) for k in PHASE_1 + PHASE_2 + PHASE_3]
+
+
+def _get_step_fn(step_key: str):
+    """Look up step function at call time so patches take effect."""
+    import pipeline.enrichment as mod
+    fn_name = _STEP_FN_NAMES[step_key]
+    return getattr(mod, fn_name)
+
+
+def _run_step(step_key, lead, enriched, meta, emit, company):
+    """Run a single enrichment step, emit events, return cost."""
+    step_fn = _get_step_fn(step_key)
+    step_name = STEP_NAMES[step_key]
+    emit({
+        'type': 'enrich_step_start',
+        'lead_id': lead.get('id'),
+        'company': company,
+        'step': step_name,
+    })
+    keys_before = set(enriched.keys())
+    start = time.time()
+    try:
+        cost = step_fn(lead, enriched, meta)
+        elapsed = time.time() - start
+        new_keys = set(enriched.keys()) - keys_before
+        fields_filled = [k for k in new_keys if k != 'enrichment_meta']
+        field_values = {}
+        field_sources = {}
+        for k in fields_filled:
+            v = enriched[k]
+            if isinstance(v, list):
+                field_values[k] = ', '.join(str(x) for x in v)
+            else:
+                field_values[k] = str(v) if v is not None else None
+            field_sources[k] = (meta.get(k) or {}).get('provider') or (meta.get(k) or {}).get('source')
+        event_type = 'enrich_step_done'
+        detail = None
+        if not fields_filled and cost == 0.0:
+            event_type = 'enrich_step_skip'
+            detail = STEP_SKIP_REASONS.get(step_key, 'Step ran but produced no new fields.')
+        emit({
+            'type': event_type,
+            'lead_id': lead.get('id'),
+            'company': company,
+            'step': step_name,
+            'cost': cost,
+            'elapsed': round(elapsed, 1),
+            'fields_filled': fields_filled,
+            'field_values': field_values,
+            'field_sources': field_sources,
+            'detail': detail,
+        })
+        return cost
+    except Exception as e:
+        elapsed = time.time() - start
+        emit({
+            'type': 'enrich_step_error',
+            'lead_id': lead.get('id'),
+            'company': company,
+            'step': step_name,
+            'error': str(e),
+            'elapsed': round(elapsed, 1),
+        })
+        return 0.0
 
 
 def enrich_lead(lead_id: int, emit=None) -> dict:
     """
-    Run the full 7-step waterfall on one lead.
+    Run the enrichment waterfall in 3 phases:
+      Phase 1 (sequential): Claude discovery -> Google Places -> Google Maps URL
+      Phase 2 (parallel):   Hunter | Apollo | Firecrawl website
+      Phase 3 (sequential): Review scrape -> Company fallback -> Claude failsafe
     Returns {'cost': float, 'sources': dict}.
     """
     if emit is None:
@@ -654,63 +735,53 @@ def enrich_lead(lead_id: int, emit=None) -> dict:
     meta: dict = {}
     total_cost = 0.0
 
-    for step_key, step_fn in STEPS:
-        step_name = STEP_NAMES[step_key]
-        emit({
-            'type': 'enrich_step_start',
-            'lead_id': lead_id,
-            'company': company,
-            'step': step_name,
-        })
-        # Snapshot keys before this step to detect what it added
-        keys_before = set(enriched.keys())
-        start = time.time()
-        try:
-            cost = step_fn(lead, enriched, meta)
-            elapsed = time.time() - start
+    # Phase 1: sequential foundation
+    for step_key in PHASE_1:
+        total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
+
+    # Phase 2: parallel data fetch
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from pipeline.config import ENRICH_PHASE2_CONCURRENCY
+
+    phase2_results = {}
+
+    def run_phase2_step(step_key):
+        step_enriched = {}
+        step_meta = {}
+        # Snapshot lead + phase1 enriched so phase2 steps see phase1 results
+        merged_lead = {**lead, **enriched}
+        cost = _run_step(step_key, merged_lead, step_enriched, step_meta, emit, company)
+        return step_key, cost, step_enriched, step_meta
+
+    with ThreadPoolExecutor(max_workers=ENRICH_PHASE2_CONCURRENCY) as executor:
+        futures = {
+            executor.submit(run_phase2_step, step_key): step_key
+            for step_key in PHASE_2
+        }
+        for future in as_completed(futures):
+            try:
+                step_key, cost, step_enriched, step_meta = future.result()
+                phase2_results[step_key] = (cost, step_enriched, step_meta)
+            except Exception:
+                pass
+
+    # Merge phase 2 results in deterministic order (hunter -> apollo -> scrape)
+    for step_key in PHASE_2:
+        if step_key in phase2_results:
+            cost, step_enriched, step_meta = phase2_results[step_key]
             total_cost += cost
-            # Only fields added by THIS step
-            new_keys = set(enriched.keys()) - keys_before
-            fields_filled = [k for k in new_keys if k != 'enrichment_meta']
-            # Build a dict of field_name → value for the UI
-            field_values = {}
-            field_sources = {}
-            for k in fields_filled:
-                v = enriched[k]
-                if isinstance(v, list):
-                    field_values[k] = ', '.join(str(x) for x in v)
-                else:
-                    field_values[k] = str(v) if v is not None else None
-                field_sources[k] = (meta.get(k) or {}).get('provider') or (meta.get(k) or {}).get('source')
-            event_type = 'enrich_step_done'
-            detail = None
-            if not fields_filled and cost == 0.0:
-                event_type = 'enrich_step_skip'
-                detail = STEP_SKIP_REASONS.get(step_key, 'Step ran but produced no new fields.')
-            emit({
-                'type': event_type,
-                'lead_id': lead_id,
-                'company': company,
-                'step': step_name,
-                'cost': cost,
-                'elapsed': round(elapsed, 1),
-                'fields_filled': fields_filled,
-                'field_values': field_values,
-                'field_sources': field_sources,
-                'detail': detail,
-            })
-        except Exception as e:
-            elapsed = time.time() - start
-            error_msg = str(e)
-            emit({
-                'type': 'enrich_step_error',
-                'lead_id': lead_id,
-                'company': company,
-                'step': step_name,
-                'error': error_msg,
-                'elapsed': round(elapsed, 1),
-            })
-            # Continue to next step — don't abort the whole waterfall
+            for field, value in step_enriched.items():
+                if value is None or value == '' or value == []:
+                    continue
+                if field not in enriched or enriched[field] is None or enriched[field] == '' or enriched[field] == []:
+                    enriched[field] = value
+            for field, source_info in step_meta.items():
+                if field in enriched and enriched[field] == step_enriched.get(field):
+                    meta[field] = source_info
+
+    # Phase 3: sequential finalization
+    for step_key in PHASE_3:
+        total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
 
     # Write to DB
     if enriched:

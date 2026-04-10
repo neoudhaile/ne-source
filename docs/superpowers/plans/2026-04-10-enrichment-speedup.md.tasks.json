@@ -4,36 +4,31 @@
     {
       "id": 0,
       "subject": "Task 0: Add enrichment config settings and disable review scrape",
-      "status": "pending",
-      "description": "**Goal:** Bump ENRICH_CONCURRENCY to 10, add ENRICH_PHASE2_CONCURRENCY = 3, set ENABLE_REVIEW_SCRAPE = False.\n\n**Files:**\n- Modify: `pipeline/config.py`\n\n```json:metadata\n{\"files\": [\"pipeline/config.py\"], \"verifyCommand\": \"grep -E 'CONCURRENCY|ENABLE_REVIEW' pipeline/config.py\", \"acceptanceCriteria\": [\"ENRICH_CONCURRENCY = 10\", \"ENRICH_PHASE2_CONCURRENCY = 3\", \"ENABLE_REVIEW_SCRAPE = False\"], \"requiresUserVerification\": false}\n```"
+      "status": "completed"
     },
     {
       "id": 1,
       "subject": "Task 1: Replace per-call x402 sessions with thread-local cache",
-      "status": "pending",
-      "blockedBy": [0],
-      "description": "**Goal:** Cache one x402 session per thread via threading.local(). Remove context manager pattern from hunter/apollo.\n\n**Files:**\n- Modify: `pipeline/enrichment.py`\n- Create: `tests/__init__.py`\n- Create: `tests/test_enrichment.py`\n\n```json:metadata\n{\"files\": [\"pipeline/enrichment.py\", \"tests/__init__.py\", \"tests/test_enrichment.py\"], \"verifyCommand\": \"venv/bin/python -m pytest tests/test_enrichment.py -v\", \"acceptanceCriteria\": [\"sessions cached per thread\", \"thread safety\", \"context manager removed\", \"3 tests pass\"], \"requiresUserVerification\": false}\n```"
+      "status": "completed",
+      "blockedBy": [0]
     },
     {
       "id": 2,
       "subject": "Task 2: Refactor steps to use STEP_REGISTRY for dynamic lookup",
-      "status": "pending",
-      "blockedBy": [1],
-      "description": "**Goal:** Replace STEPS list with STEP_REGISTRY dict + PHASE_1/2/3 string key lists. Functions looked up at call time so patches work.\n\n**Files:**\n- Modify: `pipeline/enrichment.py`\n- Test: `tests/test_enrichment.py`\n\n```json:metadata\n{\"files\": [\"pipeline/enrichment.py\", \"tests/test_enrichment.py\"], \"verifyCommand\": \"venv/bin/python -m pytest tests/test_enrichment.py -v\", \"acceptanceCriteria\": [\"STEP_REGISTRY dict\", \"PHASE lists are string keys\", \"patching works\", \"step order preserved\"], \"requiresUserVerification\": false}\n```"
+      "status": "completed",
+      "blockedBy": [1]
     },
     {
       "id": 3,
       "subject": "Task 3: Parallelize Phase 2 (Hunter + Apollo + Firecrawl)",
-      "status": "pending",
-      "blockedBy": [2],
-      "description": "**Goal:** Run Hunter, Apollo, Firecrawl concurrently. Each gets own enriched/meta dicts. Merge in deterministic order.\n\n**Files:**\n- Modify: `pipeline/enrichment.py`\n- Test: `tests/test_enrichment.py`\n\n```json:metadata\n{\"files\": [\"pipeline/enrichment.py\", \"tests/test_enrichment.py\"], \"verifyCommand\": \"venv/bin/python -m pytest tests/test_enrichment.py -v\", \"acceptanceCriteria\": [\"parallel phase 2\", \"deterministic merge\", \"error isolation\", \"phase ordering\", \"4 tests pass\"], \"requiresUserVerification\": false}\n```"
+      "status": "completed",
+      "blockedBy": [2]
     },
     {
       "id": 4,
       "subject": "Task 4: Integration tests — batch timing, data integrity, emit events",
-      "status": "pending",
-      "blockedBy": [3],
-      "description": "**Goal:** Verify combined optimizations work at batch level with 3 new integration tests.\n\n**Files:**\n- Test: `tests/test_enrichment.py`\n\n```json:metadata\n{\"files\": [\"tests/test_enrichment.py\"], \"verifyCommand\": \"venv/bin/python -m pytest tests/test_enrichment.py -v\", \"acceptanceCriteria\": [\"batch timing under 0.8s\", \"data integrity per lead\", \"18 emit events\"], \"requiresUserVerification\": false}\n```"
+      "status": "completed",
+      "blockedBy": [3]
     }
   ],
   "lastUpdated": "2026-04-10T00:00:00Z"

@@ -1,14 +1,15 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
-import type { PipelineEvent, LeadRow, FieldCell } from '../types'
+import { useState, useEffect, useRef } from 'react'
+import type { PipelineEvent, LeadRow, FieldCell, DBLead } from '../types'
 import { ENRICHABLE_FIELDS } from '../types'
 import { ChevronRight, ChevronDown, Loader2 } from 'lucide-react'
+import { getRunLeads } from '../api'
 
 // ── Field groupings (matches email_generator.py categories) ────────────────
 
 const FIELD_GROUPS = [
   {
     label: 'Owner / Contact',
-    fields: ['owner_email', 'owner_phone', 'owner_linkedin'],
+    fields: ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin'],
   },
   {
     label: 'Team',
@@ -25,6 +26,7 @@ const FIELD_GROUPS = [
 ]
 
 const FIELD_LABELS: Record<string, string> = {
+  owner_name: 'Owner',
   owner_email: 'Email',
   owner_phone: 'Phone',
   owner_linkedin: 'LinkedIn',
@@ -59,10 +61,11 @@ const SOURCE_BADGES: Record<string, { label: string; color: string }> = {
 
 // Step name → which fields it can fill
 const STEP_FIELDS: Record<string, string[]> = {
+  'Claude discovery': [],
   'Google Places': ['google_maps_url'],
   'Google Maps URL': ['google_maps_url'],
-  'Hunter.io': ['owner_email'],
-  'Apollo': ['owner_email', 'owner_phone', 'owner_linkedin', 'employee_count', 'key_staff'],
+  'Hunter.io': ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin', 'key_staff'],
+  'Apollo': ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin', 'employee_count', 'key_staff'],
   'Sixtyfour': ['owner_email', 'owner_phone', 'employee_count', 'revenue_estimate'],
   'Website scrape': ['services_offered', 'year_established', 'company_description', 'certifications', 'facebook_url', 'yelp_url', 'employee_count'],
   'Review scrape': ['review_summary'],
@@ -104,112 +107,154 @@ function sourceFromStep(step: string): string {
   return 'unknown'
 }
 
-function buildRows(events: PipelineEvent[]): LeadRow[] {
-  const rows = new Map<number, LeadRow>()
+function dbLeadToRow(lead: DBLead): LeadRow {
+  const fields = emptyFields()
+  const meta = lead.enrichment_meta || {}
 
-  for (const e of events) {
-    if (e.type === 'insert' && e.lead_id != null) {
+  for (const f of ENRICHABLE_FIELDS) {
+    const raw = lead[f as keyof DBLead]
+    if (raw == null || raw === '' || (Array.isArray(raw) && raw.length === 0)) continue
+    const display = Array.isArray(raw) ? raw.join(', ') : String(raw)
+    const source = (meta[f] as { source?: string; provider?: string } | undefined)?.source
+      || (meta[f] as { source?: string; provider?: string } | undefined)?.provider
+      || null
+    fields[f] = { value: display, source, state: 'filled', cost: 0 }
+  }
+
+  const hasEnrichment = Object.values(fields).some(f => f.state === 'filled')
+  let status: LeadRow['status'] = 'inserted'
+  if (lead.generated_email) status = 'generated'
+  else if (hasEnrichment) status = 'enriched'
+
+  return {
+    id: lead.id,
+    company: lead.company || '',
+    city: lead.city || '',
+    industry: lead.industry || '',
+    tier: lead.tier || null,
+    tierReason: lead.tier_reason || null,
+    status,
+    fields,
+    totalCost: 0,
+    generatedSubject: lead.generated_subject || null,
+    generatedEmail: lead.generated_email || null,
+  }
+}
+
+function applyEvent(rows: Map<number, LeadRow>, e: PipelineEvent): boolean {
+  if (e.type === 'start') {
+    rows.clear()
+    return true
+  }
+
+  if (e.type === 'insert' && e.lead_id != null) {
+    if (!rows.has(e.lead_id)) {
       const row = emptyRow(e.lead_id, e.company || '', e.city || '', e.industry || '')
       const fieldValues = e.field_values || {}
       const fieldSources = e.field_sources || {}
-
       for (const [field, value] of Object.entries(fieldValues)) {
         if (!row.fields[field]) continue
         row.fields[field].state = 'filled'
         row.fields[field].value = value
         row.fields[field].source = fieldSources[field] || 'csv_import'
       }
-
       if (e.generated_subject || e.generated_email) {
         row.status = 'generated'
         row.generatedSubject = e.generated_subject || null
         row.generatedEmail = e.generated_email || null
       }
-
       rows.set(e.lead_id, row)
     }
-
-    if (e.type === 'tier_lead' && e.lead_id != null) {
-      const row = rows.get(e.lead_id)
-      if (!row) continue
-      row.tier = e.tier || null
-      row.tierReason = e.tier_reason || null
-    }
-
-    if (e.type === 'lead_removed' && e.lead_id != null) {
-      rows.delete(e.lead_id)
-      continue
-    }
-
-    if (e.type === 'enrich_step_start' && e.lead_id != null) {
-      const row = rows.get(e.lead_id)
-      if (!row) continue
-      row.status = 'enriching'
-      const stepFields = STEP_FIELDS[e.step || ''] || []
-      for (const f of stepFields) {
-        if (row.fields[f]?.state === 'empty') {
-          row.fields[f].state = 'loading'
-        }
-      }
-    }
-
-    if (e.type === 'enrich_step_done' && e.lead_id != null) {
-      const row = rows.get(e.lead_id)
-      if (!row) continue
-      const filled = e.fields_filled || []
-      const fieldValues = e.field_values || {}
-      const stepFields = STEP_FIELDS[e.step || ''] || []
-      for (const f of filled) {
-        if (row.fields[f]) {
-          row.fields[f].state = 'filled'
-          row.fields[f].source = (e.field_sources || {})[f] || sourceFromStep(e.step || '')
-          row.fields[f].value = fieldValues[f] ?? null
-          row.fields[f].cost = (e.cost || 0) / Math.max(filled.length, 1)
-        }
-      }
-      for (const f of stepFields) {
-        if (row.fields[f]?.state === 'loading') {
-          row.fields[f].state = 'empty'
-        }
-      }
-      row.totalCost += e.cost || 0
-    }
-
-    if (e.type === 'enrich_step_error' && e.lead_id != null) {
-      const row = rows.get(e.lead_id)
-      if (!row) continue
-      const stepFields = STEP_FIELDS[e.step || ''] || []
-      for (const f of stepFields) {
-        if (row.fields[f]?.state === 'loading') {
-          row.fields[f].state = 'failed'
-          row.fields[f].error = e.error
-        }
-      }
-    }
-
-    if (e.type === 'enrich_done') {
-      for (const row of rows.values()) {
-        if (row.status === 'enriching') row.status = 'enriched'
-      }
-    }
-
-    if (e.type === 'generate_lead' && e.lead_id != null) {
-      const row = rows.get(e.lead_id)
-      if (row) {
-        row.status = 'generated'
-        row.generatedSubject = e.generated_subject || null
-        row.generatedEmail = e.generated_email || null
-      }
-    }
-
-    if (e.type === 'outreach_done') {
-      for (const row of rows.values()) {
-        if (row.status === 'generated') row.status = 'pushed'
-      }
-    }
+    return true
   }
 
-  return Array.from(rows.values())
+  if (e.type === 'tier_lead' && e.lead_id != null) {
+    const row = rows.get(e.lead_id)
+    if (!row) return false
+    row.tier = e.tier || null
+    row.tierReason = e.tier_reason || null
+    return true
+  }
+
+  if (e.type === 'lead_removed' && e.lead_id != null) {
+    rows.delete(e.lead_id)
+    return true
+  }
+
+  if (e.type === 'enrich_step_start' && e.lead_id != null) {
+    const row = rows.get(e.lead_id)
+    if (!row) return false
+    row.status = 'enriching'
+    const stepFields = STEP_FIELDS[e.step || ''] || []
+    for (const f of stepFields) {
+      if (row.fields[f]?.state === 'empty') {
+        row.fields[f].state = 'loading'
+      }
+    }
+    return true
+  }
+
+  if (e.type === 'enrich_step_done' && e.lead_id != null) {
+    const row = rows.get(e.lead_id)
+    if (!row) return false
+    const filled = e.fields_filled || []
+    const fieldValues = e.field_values || {}
+    const stepFields = STEP_FIELDS[e.step || ''] || []
+    for (const f of filled) {
+      if (row.fields[f]) {
+        row.fields[f].state = 'filled'
+        row.fields[f].source = (e.field_sources || {})[f] || sourceFromStep(e.step || '')
+        row.fields[f].value = fieldValues[f] ?? null
+        row.fields[f].cost = (e.cost || 0) / Math.max(filled.length, 1)
+      }
+    }
+    for (const f of stepFields) {
+      if (row.fields[f]?.state === 'loading') {
+        row.fields[f].state = 'empty'
+      }
+    }
+    row.totalCost += e.cost || 0
+    return true
+  }
+
+  if (e.type === 'enrich_step_error' && e.lead_id != null) {
+    const row = rows.get(e.lead_id)
+    if (!row) return false
+    const stepFields = STEP_FIELDS[e.step || ''] || []
+    for (const f of stepFields) {
+      if (row.fields[f]?.state === 'loading') {
+        row.fields[f].state = 'failed'
+        row.fields[f].error = e.error
+      }
+    }
+    return true
+  }
+
+  if (e.type === 'enrich_done') {
+    for (const row of rows.values()) {
+      if (row.status === 'enriching') row.status = 'enriched'
+    }
+    return true
+  }
+
+  if (e.type === 'generate_lead' && e.lead_id != null) {
+    const row = rows.get(e.lead_id)
+    if (row) {
+      row.status = 'generated'
+      row.generatedSubject = e.generated_subject || null
+      row.generatedEmail = e.generated_email || null
+    }
+    return true
+  }
+
+  if (e.type === 'outreach_done') {
+    for (const row of rows.values()) {
+      if (row.status === 'generated') row.status = 'pushed'
+    }
+    return true
+  }
+
+  return false
 }
 
 function tierBadge(tier: string | null) {
@@ -409,9 +454,46 @@ function LeadCard({ row }: { row: LeadRow }) {
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-export function LeadsTable({ events }: { events: PipelineEvent[] }) {
+export function LeadsTable({ events, runId }: { events: PipelineEvent[]; runId: number | null }) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const rows = useMemo(() => buildRows(events), [events])
+  const rowMapRef = useRef<Map<number, LeadRow>>(new Map())
+  const lastProcessedRef = useRef<number>(0)
+  const [, forceUpdate] = useState(0)
+
+  // Seed from DB whenever runId changes
+  useEffect(() => {
+    rowMapRef.current = new Map()
+    lastProcessedRef.current = 0
+    forceUpdate(n => n + 1)
+
+    if (runId == null) return
+
+    getRunLeads(runId).then(dbLeads => {
+      const map = new Map<number, LeadRow>()
+      for (const raw of dbLeads) {
+        const lead = raw as unknown as DBLead
+        map.set(lead.id, dbLeadToRow(lead))
+      }
+      rowMapRef.current = map
+      forceUpdate(n => n + 1)
+    }).catch(() => {
+      // DB seed failed — events will still populate the table
+    })
+  }, [runId])
+
+  // Process only new events incrementally (using _seq to survive array trimming)
+  useEffect(() => {
+    let changed = false
+    for (const e of events) {
+      const seq = (e as any)._seq || 0
+      if (seq <= lastProcessedRef.current) continue
+      if (applyEvent(rowMapRef.current, e)) changed = true
+      lastProcessedRef.current = seq
+    }
+    if (changed) forceUpdate(n => n + 1)
+  }, [events])
+
+  const rows = Array.from(rowMapRef.current.values())
   const totalCost = rows.reduce((sum, r) => sum + r.totalCost, 0)
   const totalFilled = rows.reduce((sum, r) =>
     sum + Object.values(r.fields).filter(f => f.state === 'filled').length, 0)

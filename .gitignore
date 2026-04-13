@@ -6,3 +6,5 @@ ui/dist/
 *.pyc
 .DS_Store
 *.md
+logs/
+errors.txt

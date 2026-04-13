@@ -5,12 +5,15 @@ Uses Orthogonal APIs (via x402) for steps 1-6, Claude API as failsafe (step 7).
 Each step only populates fields that are still empty after previous steps.
 """
 
+import logging
 import os
 import json
 import threading
 import time
+import traceback
 import requests
 import anthropic
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from eth_account import Account
 from x402 import x402ClientSync
 from x402.mechanisms.evm.exact.v1.client import ExactEvmSchemeV1
@@ -28,11 +31,22 @@ from pipeline.google_places import find_place, get_place_details
 
 load_dotenv()
 
+# ── Error logger — writes to logs/enrichment_errors.log ──────────────────────
+_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+os.makedirs(_LOG_DIR, exist_ok=True)
+
+_error_logger = logging.getLogger('enrichment_errors')
+_error_logger.setLevel(logging.ERROR)
+_error_handler = logging.FileHandler(os.path.join(_LOG_DIR, 'enrichment_errors.log'))
+_error_handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)s | %(message)s'))
+_error_logger.addHandler(_error_handler)
+_error_logger.propagate = False
+
 # ── Claude client (for failsafe) ───────────────────────────────────────────
 claude = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
 ENRICHABLE_FIELDS = [
-    'owner_email', 'owner_phone', 'owner_linkedin',
+    'owner_name', 'owner_email', 'owner_phone', 'owner_linkedin',
     'employee_count', 'key_staff', 'year_established', 'services_offered',
     'company_description', 'revenue_estimate', 'certifications',
     'review_summary', 'facebook_url', 'yelp_url', 'google_maps_url',
@@ -54,11 +68,11 @@ STEP_NAMES = {
 }
 
 STEP_SKIP_REASONS = {
-    'claude_discovery': 'No company context available to infer lookup fields, or lookup fields already exist.',
+    'claude_discovery': 'No company context available to infer website, or website already exists.',
     'google_places': 'No company/address data available for place matching, or no place match found.',
     'google_maps': 'No real Google place ID available.',
-    'hunter': 'No website/domain available for email lookup.',
-    'apollo': 'No owner name or website/domain available for people matching.',
+    'hunter': 'No website/domain available for owner-contact lookup.',
+    'apollo': 'No usable owner/company context remained for people matching.',
     'scrape_website': 'No website available to scrape, or no scraper fallback is configured.',
     'scrape_reviews': 'No review URL available to scrape, or no scraper fallback is configured.',
     'company_fallback': 'No company email or phone available to reuse.',
@@ -71,6 +85,87 @@ LOW_VALUE_CLAUDE_FIELDS = {
     'yelp_url',
 }
 HUNTER_RETRIES = 2
+
+OWNER_FIELD_SOURCE_PRIORITY = {
+    'owner_name': {
+        'apollo': 100,
+        'hunter': 80,
+        'company_fallback': 10,
+        'claude_discovery': 5,
+        'scrape': 0,
+        'claude_inferred': 0,
+    },
+    'owner_email': {
+        'apollo': 100,
+        'hunter': 90,
+        'company_fallback': 10,
+        'claude_inferred': 0,
+    },
+    'owner_phone': {
+        'apollo': 100,
+        'hunter': 85,
+        'company_fallback': 10,
+        'claude_inferred': 0,
+    },
+    'owner_linkedin': {
+        'apollo': 100,
+        'hunter': 70,
+        'claude_inferred': 0,
+    },
+    'key_staff': {
+        'apollo': 100,
+        'hunter': 60,
+        'claude_inferred': 0,
+    },
+}
+
+GENERIC_EMAIL_PREFIXES = {
+    'info', 'sales', 'support', 'contact', 'hello', 'team', 'office', 'admin',
+    'billing', 'careers', 'jobs', 'service', 'customerservice', 'customersupport',
+}
+
+OWNER_TITLE_KEYWORDS = (
+    'owner', 'founder', 'co-founder', 'president', 'ceo', 'principal',
+    'managing partner', 'partner', 'director', 'manager',
+)
+
+_x402_insufficient = False
+_x402_consecutive_402s = 0
+_X402_CONSECUTIVE_THRESHOLD = 3  # Flag as insufficient after 3 consecutive 402s
+
+
+def reset_x402_flag():
+    """Reset the insufficient funds flag. Used between runs and in tests."""
+    global _x402_insufficient, _x402_consecutive_402s
+    _x402_insufficient = False
+    _x402_consecutive_402s = 0
+
+
+def _claude_call_with_retry(fn, max_retries=3):
+    """Call fn(), retrying on Claude 429 rate-limit errors.
+    Respects retry-after header when available, otherwise uses exponential backoff."""
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except anthropic.RateLimitError as e:
+            if attempt >= max_retries:
+                raise
+            # Try to read retry-after from the response headers
+            retry_after = None
+            resp = getattr(e, 'response', None)
+            if resp is not None:
+                retry_after = resp.headers.get('retry-after')
+            if retry_after:
+                try:
+                    wait = float(retry_after)
+                except (ValueError, TypeError):
+                    wait = 5 * (2 ** attempt)
+            else:
+                wait = 5 * (2 ** attempt)  # 5s, 10s, 20s
+            _error_logger.error('Claude 429 (attempt %d/%d), waiting %.1fs: %s', attempt + 1, max_retries, wait, e)
+            time.sleep(wait)
+        except Exception:
+            raise
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -89,6 +184,39 @@ def _x402_session() -> requests.Session:
     session.mount('https://', x402_http_adapter(client))
     _thread_local.x402_session = session
     return session
+
+
+# USDC contract on Base
+_USDC_BASE_CONTRACT = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+_BASE_RPC = 'https://mainnet.base.org'
+
+
+def check_x402_balance() -> float:
+    """Return USDC balance in dollars for the x402 wallet on Base.
+    Returns 0.0 on any error."""
+    try:
+        account = Account.from_key(os.getenv('PRIVATE_KEY'))
+        address = account.address
+        # balanceOf(address) selector = 0x70a08231, left-padded to 32 bytes
+        padded = address[2:].lower().zfill(64)
+        data = '0x70a08231' + padded
+        payload = {
+            'jsonrpc': '2.0',
+            'id': 1,
+            'method': 'eth_call',
+            'params': [
+                {'to': _USDC_BASE_CONTRACT, 'data': data},
+                'latest',
+            ],
+        }
+        # Plain requests.post — Base RPC is free, no x402 payment needed
+        resp = requests.post(_BASE_RPC, json=payload, timeout=10)
+        hex_balance = resp.json().get('result', '0x0')
+        raw = int(hex_balance, 16)
+        return raw / 1_000_000  # USDC has 6 decimals
+    except Exception:
+        return 0.0
+
 
 def _get_missing(lead: dict, enriched: dict) -> list[str]:
     """Return field names still empty in both lead and enriched."""
@@ -111,12 +239,89 @@ def _value(lead: dict, enriched: dict, key: str):
     return enriched.get(key) or lead.get(key)
 
 
+def _is_empty(value) -> bool:
+    return value is None or value == '' or value == []
+
+
+def _field_source(meta: dict, field: str) -> str | None:
+    info = meta.get(field) or {}
+    return info.get('source') or info.get('provider')
+
+
+def _source_priority(field: str, source: str | None) -> int:
+    if not source:
+        return 0
+    return OWNER_FIELD_SOURCE_PRIORITY.get(field, {}).get(source, 0)
+
+
+def _generic_email(email: str | None) -> bool:
+    if not email or '@' not in email:
+        return True
+    local = email.split('@', 1)[0].lower()
+    return local in GENERIC_EMAIL_PREFIXES
+
+
+def _name_quality(name: str | None) -> int:
+    if not name:
+        return 0
+    tokens = [token for token in str(name).strip().split() if token]
+    score = len(tokens) * 10
+    if len(tokens) >= 2:
+        score += 20
+    if all(any(ch.isalpha() for ch in token) for token in tokens):
+        score += 5
+    return score
+
+
+def _email_quality(email: str | None) -> int:
+    if not email:
+        return 0
+    score = 20
+    if '@' in email:
+        score += 20
+    if not _generic_email(email):
+        score += 40
+    return score
+
+
+def _should_replace(field: str, current_value, current_meta: dict, new_value, new_source: str | None) -> bool:
+    if _is_empty(new_value):
+        return False
+    if _is_empty(current_value):
+        return True
+    if field not in OWNER_FIELD_SOURCE_PRIORITY:
+        return False
+
+    current_source = _field_source(current_meta, field)
+    current_priority = _source_priority(field, current_source)
+    new_priority = _source_priority(field, new_source)
+    if new_priority > current_priority:
+        return True
+    if new_priority < current_priority:
+        return False
+
+    if field == 'owner_email':
+        return _email_quality(str(new_value)) > _email_quality(str(current_value))
+    if field == 'owner_name':
+        return _name_quality(str(new_value)) > _name_quality(str(current_value))
+    if field == 'key_staff':
+        current_len = len(current_value) if isinstance(current_value, list) else 0
+        new_len = len(new_value) if isinstance(new_value, list) else 0
+        return new_len > current_len
+    return False
+
+
 def _merge(enriched: dict, meta: dict, result: dict, source: str):
     """Merge non-empty values from result into enriched, tag in meta."""
     for k, v in result.items():
-        if v is None or v == '' or v == []:
+        if _is_empty(v):
             continue
-        if k not in enriched or enriched[k] is None or enriched[k] == '' or enriched[k] == []:
+        current_value = enriched.get(k)
+        if _should_replace(k, current_value, meta, v, source):
+            enriched[k] = v
+            meta[k] = {'source': source}
+            continue
+        if k not in enriched or _is_empty(current_value):
             enriched[k] = v
             meta[k] = {'source': source}
 
@@ -148,7 +353,7 @@ def _step_company_contact_fallback(lead: dict, enriched: dict, meta: dict) -> fl
 # ── Step 1: Claude discovery ────────────────────────────────────────────────
 
 def _step_claude_discovery(lead: dict, enriched: dict, meta: dict) -> float:
-    target_fields = ['website', 'owner_name']
+    target_fields = ['website']
     missing = [f for f in target_fields if not _value(lead, enriched, f)]
     if not missing:
         return 0.0
@@ -162,19 +367,20 @@ def _step_claude_discovery(lead: dict, enriched: dict, meta: dict) -> float:
         return 0.0
 
     prompt = (
-        'You are preparing lookup fields for downstream enrichment. '
-        'Use the known business context below to infer likely values ONLY for website and owner_name. '
-        'Be conservative. If a field is not reasonably supportable, return null. '
-        'Do not invent personal contact data.\n\n'
+        'You are preparing lookup fields for downstream enrichment of a small/medium business. '
+        'Use the known business context below to infer a likely website. '
+        'Do not invent contact data (emails, phones). If you cannot determine a field, return null.\n\n'
         f'{json.dumps(known, indent=2, default=str)}\n\n'
-        'Return ONLY JSON with keys: website, owner_name.'
+        'Return ONLY JSON with key: website.'
     )
 
     try:
-        response = claude.messages.create(
-            model='claude-haiku-4-5-20251001',
-            max_tokens=200,
-            messages=[{'role': 'user', 'content': prompt}],
+        response = _claude_call_with_retry(
+            lambda: claude.messages.create(
+                model='claude-haiku-4-5-20251001',
+                max_tokens=200,
+                messages=[{'role': 'user', 'content': prompt}],
+            )
         )
         text = response.content[0].text
         if '```' in text:
@@ -186,8 +392,6 @@ def _step_claude_discovery(lead: dict, enriched: dict, meta: dict) -> float:
         result = {}
         if result_data.get('website') and not _value(lead, enriched, 'website'):
             result['website'] = str(result_data['website']).strip()
-        if result_data.get('owner_name') and not _value(lead, enriched, 'owner_name'):
-            result['owner_name'] = str(result_data['owner_name']).strip()
         _merge(enriched, meta, result, 'claude_discovery')
         cost = (response.usage.input_tokens * 0.003 + response.usage.output_tokens * 0.015) / 1000
         return cost
@@ -262,7 +466,12 @@ def _step_google_maps(lead: dict, enriched: dict, meta: dict) -> float:
 # ── Step 4: Hunter.io — email lookup ───────────────────────────────────────
 
 def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
-    if _value(lead, enriched, 'owner_email'):
+    global _x402_insufficient, _x402_consecutive_402s
+    if _x402_insufficient:
+        return 0.0
+    target_fields = ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin', 'key_staff']
+    missing = [f for f in target_fields if not _value(lead, enriched, f)]
+    if not missing:
         return 0.0
     domain = _domain_from_website(_value(lead, enriched, 'website'))
     company = _value(lead, enriched, 'company')
@@ -277,11 +486,133 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
                 params={'domain': domain, 'limit': 5},
                 timeout=SLOW_TIMEOUT,
             )
+            if resp.status_code == 402:
+                _x402_consecutive_402s += 1
+                if _x402_consecutive_402s >= _X402_CONSECUTIVE_THRESHOLD:
+                    _x402_insufficient = True
+            else:
+                _x402_consecutive_402s = 0
             resp.raise_for_status()
             data = resp.json()
-            emails = data.get('data', {}).get('emails', [])
-            if emails:
-                _merge(enriched, meta, {'owner_email': emails[0].get('value')}, 'hunter')
+            email_data = data.get('data', {}) or {}
+            emails = email_data.get('emails', []) or []
+            result = {}
+
+            known_owner_name = _value(lead, enriched, 'owner_name')
+
+            def candidate_name(candidate: dict) -> str | None:
+                first = (candidate.get('first_name') or '').strip()
+                last = (candidate.get('last_name') or '').strip()
+                full = ' '.join(part for part in (first, last) if part).strip()
+                return full or None
+
+            def candidate_phone(candidate: dict) -> str | None:
+                for key in ('phone_number', 'phone', 'mobile_phone', 'work_phone'):
+                    if candidate.get(key):
+                        return str(candidate[key]).strip()
+                return None
+
+            def candidate_linkedin(candidate: dict) -> str | None:
+                for key in ('linkedin', 'linkedin_url'):
+                    if candidate.get(key):
+                        return str(candidate[key]).strip()
+                return None
+
+            def candidate_score(candidate: dict) -> int:
+                score = 0
+                email = str(candidate.get('value') or '').strip()
+                if email:
+                    score += _email_quality(email)
+                confidence = candidate.get('confidence')
+                if isinstance(confidence, (int, float)):
+                    score += int(confidence)
+                person_name = candidate_name(candidate)
+                if person_name:
+                    score += _name_quality(person_name)
+                title = str(candidate.get('position') or candidate.get('department') or '').lower()
+                if any(keyword in title for keyword in OWNER_TITLE_KEYWORDS):
+                    score += 35
+                if known_owner_name and person_name:
+                    if person_name.lower() == str(known_owner_name).lower():
+                        score += 40
+                    else:
+                        known_tokens = set(str(known_owner_name).lower().split())
+                        person_tokens = set(person_name.lower().split())
+                        if known_tokens & person_tokens:
+                            score += 20
+                return score
+
+            ranked = sorted(emails, key=candidate_score, reverse=True)
+            best = ranked[0] if ranked else None
+            if best:
+                if best.get('value'):
+                    result['owner_email'] = str(best['value']).strip()
+                best_name = candidate_name(best)
+                if best_name:
+                    result['owner_name'] = best_name
+                best_phone = candidate_phone(best)
+                if best_phone:
+                    result['owner_phone'] = best_phone
+                best_linkedin = candidate_linkedin(best)
+                if best_linkedin:
+                    result['owner_linkedin'] = best_linkedin
+
+            staff = []
+            for candidate in ranked[:5]:
+                name = candidate_name(candidate)
+                if name and name not in staff:
+                    staff.append(name)
+            if staff:
+                result['key_staff'] = staff
+
+            owner_name = result.get('owner_name') or known_owner_name
+            if owner_name:
+                try:
+                    parts = str(owner_name).split()
+                    finder_params = {
+                        'domain': domain,
+                        'full_name': str(owner_name),
+                    }
+                    if parts:
+                        finder_params['first_name'] = parts[0]
+                    if len(parts) > 1:
+                        finder_params['last_name'] = ' '.join(parts[1:])
+                    finder_resp = session.get(
+                        f'{ORTH_BASE}/hunter/v2/email-finder',
+                        params=finder_params,
+                        timeout=SLOW_TIMEOUT,
+                    )
+                    if finder_resp.status_code == 402:
+                        _x402_consecutive_402s += 1
+                        if _x402_consecutive_402s >= _X402_CONSECUTIVE_THRESHOLD:
+                            _x402_insufficient = True
+                    else:
+                        _x402_consecutive_402s = 0
+                    finder_resp.raise_for_status()
+                    finder_data = finder_resp.json().get('data', {}) or {}
+                    if finder_data.get('email'):
+                        result['owner_email'] = str(finder_data['email']).strip()
+                    if finder_data.get('first_name') or finder_data.get('last_name'):
+                        first = str(finder_data.get('first_name') or '').strip()
+                        last = str(finder_data.get('last_name') or '').strip()
+                        full_name = ' '.join(part for part in (first, last) if part).strip()
+                        if full_name:
+                            result['owner_name'] = full_name
+                    for key in ('linkedin', 'linkedin_url'):
+                        if finder_data.get(key):
+                            result['owner_linkedin'] = str(finder_data[key]).strip()
+                            break
+                    for key in ('phone_number', 'phone'):
+                        if finder_data.get(key):
+                            result['owner_phone'] = str(finder_data[key]).strip()
+                            break
+                except Exception as finder_error:
+                    _error_logger.error(
+                        'Hunter email-finder soft failure lead_id=%s company=%s domain=%s owner_name=%s error=%s',
+                        lead.get('id'), company, domain, owner_name, finder_error,
+                    )
+
+            _merge(enriched, meta, result, 'hunter')
             return 0.01
         except requests.exceptions.Timeout as e:
             last_error = e
@@ -297,7 +628,10 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
 # ── Step 5: Apollo — people match ──────────────────────────────────────────
 
 def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
-    target_fields = ['owner_email', 'owner_phone', 'owner_linkedin',
+    global _x402_insufficient, _x402_consecutive_402s
+    if _x402_insufficient:
+        return 0.0
+    target_fields = ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin',
                      'employee_count', 'key_staff']
     missing = [f for f in target_fields if not (enriched.get(f) or lead.get(f))]
     if not missing:
@@ -306,17 +640,24 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
     domain = _domain_from_website(_value(lead, enriched, 'website'))
     company = _value(lead, enriched, 'company') or ''
     # Apollo needs enough context to have a realistic match chance.
-    if not company or (not owner_name and not domain):
+    owner_email = _value(lead, enriched, 'owner_email') or ''
+    if not company or (not owner_name and not domain and not owner_email):
         return 0.0
     try:
         payload = {
             'reveal_personal_emails': True,
+            'reveal_phone_number': True,
+            'run_waterfall_email': True,
+            'run_waterfall_phone': True,
         }
         if _value(lead, enriched, 'company'):
             payload['organization_name'] = _value(lead, enriched, 'company')
         if domain:
             payload['domain'] = domain
+        if owner_email:
+            payload['email'] = owner_email
         if owner_name:
+            payload['name'] = owner_name
             payload['first_name'] = owner_name.split(' ')[0]
             last = ' '.join(owner_name.split(' ')[1:])
             if last:
@@ -325,13 +666,21 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
         resp = session.post(
             f'{ORTH_BASE}/apollo/api/v1/people/match',
             json=payload,
-            timeout=FAST_TIMEOUT,
-        )
+                timeout=SLOW_TIMEOUT,
+            )
+        if resp.status_code == 402:
+            _x402_consecutive_402s += 1
+            if _x402_consecutive_402s >= _X402_CONSECUTIVE_THRESHOLD:
+                _x402_insufficient = True
+        else:
+            _x402_consecutive_402s = 0
         resp.raise_for_status()
         data = resp.json()
         person = data.get('person') or {}
         org = person.get('organization') or {}
         result = {}
+        if person.get('name'):
+            result['owner_name'] = person['name']
         if person.get('email'):
             result['owner_email'] = person['email']
         if person.get('phone_numbers'):
@@ -478,14 +827,16 @@ def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
             'Do not guess or infer email addresses or phone numbers. '
             'If a field is not clearly present, use null. '
             'Return ONLY JSON with keys: '
-            'email, phone, owner_name, services_offered, year_established, '
+            'email, phone, services_offered, year_established, '
             'company_description, certifications, facebook_url, yelp_url, employee_count.\n\n'
             f'{evidence}'
         )
-        response = claude.messages.create(
-            model='claude-haiku-4-5-20251001',
-            max_tokens=800,
-            messages=[{'role': 'user', 'content': prompt}],
+        response = _claude_call_with_retry(
+            lambda: claude.messages.create(
+                model='claude-haiku-4-5-20251001',
+                max_tokens=800,
+                messages=[{'role': 'user', 'content': prompt}],
+            )
         )
         text = response.content[0].text
         if '```' in text:
@@ -499,8 +850,6 @@ def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
             result['email'] = str(result_data['email'])
         if result_data.get('phone'):
             result['phone'] = str(result_data['phone'])
-        if result_data.get('owner_name'):
-            result['owner_name'] = str(result_data['owner_name'])
         if result_data.get('services_offered'):
             val = result_data['services_offered']
             result['services_offered'] = val if isinstance(val, list) else [val]
@@ -607,10 +956,12 @@ def _step_claude_failsafe(lead: dict, enriched: dict, meta: dict) -> float:
     )
 
     try:
-        response = claude.messages.create(
-            model='claude-haiku-4-5-20251001',
-            max_tokens=800,
-            messages=[{'role': 'user', 'content': prompt}],
+        response = _claude_call_with_retry(
+            lambda: claude.messages.create(
+                model='claude-haiku-4-5-20251001',
+                max_tokens=800,
+                messages=[{'role': 'user', 'content': prompt}],
+            )
         )
         text = response.content[0].text
         if '```' in text:
@@ -644,8 +995,8 @@ _STEP_FN_NAMES = {
 }
 
 PHASE_1 = ['claude_discovery', 'google_places', 'google_maps']
-PHASE_2 = ['hunter', 'apollo', 'scrape_website']
-PHASE_3 = ['scrape_reviews', 'company_fallback', 'claude_failsafe']
+PHASE_2 = ['hunter', 'scrape_website']
+PHASE_3 = ['apollo', 'scrape_reviews', 'company_fallback', 'claude_failsafe']
 
 # Backward compat
 STEPS = [(k, globals()[_STEP_FN_NAMES[k]]) for k in PHASE_1 + PHASE_2 + PHASE_3]
@@ -669,6 +1020,7 @@ def _run_step(step_key, lead, enriched, meta, emit, company):
         'step': step_name,
     })
     keys_before = set(enriched.keys())
+    was_insufficient = _x402_insufficient
     start = time.time()
     try:
         cost = step_fn(lead, enriched, meta)
@@ -688,7 +1040,10 @@ def _run_step(step_key, lead, enriched, meta, emit, company):
         detail = None
         if not fields_filled and cost == 0.0:
             event_type = 'enrich_step_skip'
-            detail = STEP_SKIP_REASONS.get(step_key, 'Step ran but produced no new fields.')
+            if _x402_insufficient and step_key in ('hunter', 'apollo'):
+                detail = 'Skipped — insufficient x402 balance'
+            else:
+                detail = STEP_SKIP_REASONS.get(step_key, 'Step ran but produced no new fields.')
         emit({
             'type': event_type,
             'lead_id': lead.get('id'),
@@ -704,6 +1059,10 @@ def _run_step(step_key, lead, enriched, meta, emit, company):
         return cost
     except Exception as e:
         elapsed = time.time() - start
+        _error_logger.error(
+            'lead_id=%s company=%s step=%s error=%s\n%s',
+            lead.get('id'), company, step_name, e, traceback.format_exc(),
+        )
         emit({
             'type': 'enrich_step_error',
             'lead_id': lead.get('id'),
@@ -712,19 +1071,30 @@ def _run_step(step_key, lead, enriched, meta, emit, company):
             'error': str(e),
             'elapsed': round(elapsed, 1),
         })
+        # Emit insufficient_funds only on the FIRST 402 (flag just flipped)
+        if _x402_insufficient and not was_insufficient:
+            balance = check_x402_balance()
+            emit({
+                'type': 'insufficient_funds',
+                'message': f"get ur money up — x402 payment failed. Balance: ${balance:.2f}",
+            })
         return 0.0
 
 
-def enrich_lead(lead_id: int, emit=None) -> dict:
+def enrich_lead(lead_id: int, emit=None, wait_if_paused=None) -> dict:
     """
     Run the enrichment waterfall in 3 phases:
       Phase 1 (sequential): Claude discovery -> Google Places -> Google Maps URL
-      Phase 2 (parallel):   Hunter | Apollo | Firecrawl website
-      Phase 3 (sequential): Review scrape -> Company fallback -> Claude failsafe
+      Phase 2 (parallel):   Hunter | Website scrape
+      Phase 3 (sequential): Apollo -> Review scrape -> Company fallback -> Claude failsafe
     Returns {'cost': float, 'sources': dict}.
     """
     if emit is None:
         emit = lambda e: None
+
+    def _pause_check():
+        if wait_if_paused is not None:
+            wait_if_paused()
 
     lead = get_lead(lead_id)
     if not lead:
@@ -737,10 +1107,11 @@ def enrich_lead(lead_id: int, emit=None) -> dict:
 
     # Phase 1: sequential foundation
     for step_key in PHASE_1:
+        _pause_check()
         total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
 
     # Phase 2: parallel data fetch
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    _pause_check()
     from pipeline.config import ENRICH_PHASE2_CONCURRENCY
 
     phase2_results = {}
@@ -762,25 +1133,33 @@ def enrich_lead(lead_id: int, emit=None) -> dict:
             try:
                 step_key, cost, step_enriched, step_meta = future.result()
                 phase2_results[step_key] = (cost, step_enriched, step_meta)
-            except Exception:
-                pass
+            except Exception as exc:
+                _error_logger.error(
+                    'lead_id=%s company=%s phase2_future step=%s error=%s\n%s',
+                    lead_id, company, futures[future], exc, traceback.format_exc(),
+                )
 
-    # Merge phase 2 results in deterministic order (hunter -> apollo -> scrape)
+    # Merge phase 2 results in deterministic order (hunter -> scrape)
     for step_key in PHASE_2:
         if step_key in phase2_results:
             cost, step_enriched, step_meta = phase2_results[step_key]
             total_cost += cost
             for field, value in step_enriched.items():
-                if value is None or value == '' or value == []:
+                if _is_empty(value):
                     continue
-                if field not in enriched or enriched[field] is None or enriched[field] == '' or enriched[field] == []:
+                source_info = step_meta.get(field) or {}
+                source = source_info.get('source') or source_info.get('provider')
+                if _should_replace(field, enriched.get(field), meta, value, source):
                     enriched[field] = value
-            for field, source_info in step_meta.items():
-                if field in enriched and enriched[field] == step_enriched.get(field):
-                    meta[field] = source_info
+                    meta[field] = dict(source_info)
+                    continue
+                if field not in enriched or _is_empty(enriched[field]):
+                    enriched[field] = value
+                    meta[field] = dict(source_info)
 
     # Phase 3: sequential finalization
     for step_key in PHASE_3:
+        _pause_check()
         total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
 
     # Write to DB

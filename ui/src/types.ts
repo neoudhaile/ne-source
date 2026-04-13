@@ -46,6 +46,9 @@ export interface PipelineEvent {
   kept?: number
   removed?: number
   error?: string
+  // insufficient funds
+  balance?: number
+  estimated_cost?: number
   // email generation
   generated_subject?: string
   generated_email?: string
@@ -124,6 +127,7 @@ export interface LeadRow {
 
 export const ENRICHABLE_FIELDS = [
   'google_maps_url',
+  'owner_name',
   'owner_email',
   'owner_phone',
   'owner_linkedin',
@@ -138,6 +142,35 @@ export const ENRICHABLE_FIELDS = [
   'facebook_url',
   'yelp_url',
 ] as const
+
+export interface DBLead {
+  id: number
+  company: string
+  city: string
+  industry: string
+  tier: string | null
+  tier_reason: string | null
+  run_id: number | null
+  // enrichable fields
+  google_maps_url: string | null
+  owner_email: string | null
+  owner_phone: string | null
+  owner_linkedin: string | null
+  employee_count: number | null
+  key_staff: string[] | null
+  year_established: number | null
+  services_offered: string[] | null
+  company_description: string | null
+  revenue_estimate: string | null
+  certifications: string[] | null
+  review_summary: string | null
+  facebook_url: string | null
+  yelp_url: string | null
+  // meta
+  enrichment_meta: Record<string, { source?: string; provider?: string }> | null
+  generated_subject: string | null
+  generated_email: string | null
+}
 
 export const FIELD_LABELS: Record<string, string> = {
   google_maps_url: 'Maps',

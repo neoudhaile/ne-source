@@ -19,7 +19,7 @@ from pipeline.db import (
 )
 from pipeline.scraper import search_businesses, API_PAGE_SIZE
 from pipeline.normalize import normalize_lead
-from pipeline.enrichment import enrich_lead
+from pipeline.enrichment import enrich_lead, check_x402_balance, reset_x402_flag
 from pipeline.tiering import tier_leads
 
 
@@ -95,6 +95,7 @@ def _run_stage_concurrently(
 def run_pipeline(emit=None, run_id=None, wait_if_paused=None):
     if emit is None:
         emit = lambda e: None
+    reset_x402_flag()
 
     conn = get_connection()
     inserted_total = 0
@@ -214,12 +215,26 @@ def run_pipeline(emit=None, run_id=None, wait_if_paused=None):
         # ── Enrich stage ───────────────────────────────────────────────────
         total_cost = 0.0
 
+        # ── Pre-flight balance check ──────────────────────────────────────
+        estimated_cost = len(inserted_ids) * 0.003
+        if estimated_cost > 0:
+            balance = check_x402_balance()
+            if balance < estimated_cost:
+                emit({
+                    'type': 'insufficient_funds',
+                    'balance': round(balance, 4),
+                    'estimated_cost': round(estimated_cost, 2),
+                    'message': f"get ur money up — you don't have enough USDC in your Base wallet. Balance: ${balance:.2f}, need ~${estimated_cost:.2f}",
+                })
+                # Pause and wait — user can hit "Continue Anyway" from the UI
+                _checkpoint(wait_if_paused)
+
         emit({'type': 'enrich_start', 'count': len(inserted_ids)})
         inserted_lead_map = {lead['id']: lead for lead in inserted_leads}
 
         total_cost += _run_stage_concurrently(
             inserted_ids,
-            lambda lead_id: enrich_lead(lead_id, emit=emit),
+            lambda lead_id: enrich_lead(lead_id, emit=emit, wait_if_paused=wait_if_paused),
             lambda lead_id, result, completed, total: emit({
                 'type': 'enrich_lead',
                 'index': completed,
@@ -265,6 +280,7 @@ def run_csv_pipeline(lead_ids: list[int], emit=None, run_id=None, wait_if_paused
     """Run enrichment + email generation on pre-inserted CSV leads (skip search)."""
     if emit is None:
         emit = lambda e: None
+    reset_x402_flag()
 
     total_cost = 0.0
 
@@ -320,10 +336,24 @@ def run_csv_pipeline(lead_ids: list[int], emit=None, run_id=None, wait_if_paused
         lead_map = {lead['id']: lead for lead in inserted_leads}
 
         # ── Enrich stage ───────────────────────────────────────────────────
+        # ── Pre-flight balance check ──────────────────────────────────────
+        estimated_cost = len(lead_ids) * 0.003
+        if estimated_cost > 0:
+            balance = check_x402_balance()
+            if balance < estimated_cost:
+                emit({
+                    'type': 'insufficient_funds',
+                    'balance': round(balance, 4),
+                    'estimated_cost': round(estimated_cost, 2),
+                    'message': f"get ur money up — you don't have enough USDC in your Base wallet. Balance: ${balance:.2f}, need ~${estimated_cost:.2f}",
+                })
+                # Pause and wait — user can hit "Continue Anyway" from the UI
+                _checkpoint(wait_if_paused)
+
         emit({'type': 'enrich_start', 'count': len(lead_ids)})
         total_cost += _run_stage_concurrently(
             lead_ids,
-            lambda lead_id: enrich_lead(lead_id, emit=emit),
+            lambda lead_id: enrich_lead(lead_id, emit=emit, wait_if_paused=wait_if_paused),
             lambda lead_id, result, completed, total: emit({
                 'type': 'enrich_lead',
                 'index': completed,

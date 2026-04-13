@@ -83,7 +83,7 @@ function formatEvent(e: PipelineEvent): { text: string; color: string } | null {
     case 'enrich_lead':
       return { text: `  Enriched ${e.company} (${e.index}/${e.total}) — ${e.sources?.join(', ') || 'no sources'}`, color: 'text-cyan-400' }
     case 'enrich_done':
-      return { text: `Enrichment complete — ${e.count} leads enriched`, color: 'text-green-300' }
+      return { text: e.message || `Enrichment complete — ${e.count} leads enriched`, color: 'text-green-300' }
     case 'enrich_error':
       return { text: `Enrichment error: ${e.message}`, color: 'text-red-400' }
     case 'generate_start':
@@ -98,6 +98,8 @@ function formatEvent(e: PipelineEvent): { text: string; color: string } | null {
       return { text: 'Run paused', color: 'text-yellow-400' }
     case 'resumed':
       return { text: 'Run resumed', color: 'text-blue-400' }
+    case 'insufficient_funds':
+      return { text: `⚠ ${e.message || `Insufficient USDC balance (have: $${e.balance?.toFixed(2) ?? '?'}, need: ~$${e.estimated_cost?.toFixed(2) ?? '?'})`}`, color: 'text-red-400' }
     case 'error':
       return { text: `Error: ${e.message}`, color: 'text-red-400' }
     default:

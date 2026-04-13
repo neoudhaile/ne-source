@@ -2,6 +2,8 @@ import { useState, useRef, useCallback } from 'react'
 import { openRunSocket } from '../api'
 import type { PipelineEvent } from '../types'
 
+let _eventSeq = 0
+
 export function usePipelineSocket() {
   const [events, setEvents] = useState<PipelineEvent[]>([])
   const [isRunning, setIsRunning] = useState(false)
@@ -15,14 +17,16 @@ export function usePipelineSocket() {
 
     if (resetEvents) {
       setEvents([])
+      _eventSeq = 0
     }
     setIsRunning(true)
     activeRunIdRef.current = runId
 
     const ws = openRunSocket(runId, (event) => {
+      (event as any)._seq = ++_eventSeq
       setEvents(prev => {
         const next = [...prev, event]
-        return next.length > 500 ? next.slice(-500) : next
+        return next.length > 2000 ? next.slice(-2000) : next
       })
 
       if (event.type === 'done' || event.type === 'error') {

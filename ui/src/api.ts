@@ -66,6 +66,12 @@ export async function getLead(id: number): Promise<Record<string, unknown>> {
   return res.json()
 }
 
+export async function getRunLeads(runId: number): Promise<Record<string, unknown>[]> {
+  const res = await fetch(`/api/runs/${runId}/leads`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function uploadCsv(file: File): Promise<CsvUploadResponse> {
   const form = new FormData()
   form.append('file', file)

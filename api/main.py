@@ -10,7 +10,7 @@ from fastapi.responses import PlainTextResponse
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from pipeline.db import get_connection, get_lead, get_tier1_leads_for_run
 from pipeline.csv_import import import_csv
-from api.db_queries import get_runs, get_stats
+from api.db_queries import create_run, update_run, get_runs, get_stats, get_leads_by_run_id
 from api.models import (
     RunRecord, StatsResponse, StatusResponse,
     ConfigPayload, TriggerResponse
@@ -233,6 +233,16 @@ def get_lead_detail(lead_id: int):
     if not lead:
         raise HTTPException(status_code=404, detail='Lead not found')
     return _serialize_lead(lead)
+
+
+@app.get('/api/runs/{run_id}/leads')
+def get_run_leads(run_id: int):
+    conn = get_connection()
+    try:
+        leads = get_leads_by_run_id(conn, run_id)
+        return [_serialize_lead(lead) for lead in leads]
+    finally:
+        conn.close()
 
 
 def _serialize_lead(lead: dict) -> dict:

@@ -22,6 +22,8 @@ export default function App() {
   const [uploading, setUploading] = useState(false)
   const [togglingPause, setTogglingPause] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [fundsAlert, setFundsAlert] = useState<{ balance: number; estimated_cost: number } | null>(null)
+  const fundsDismissedRef = useRef(false)
 
   const { events, isRunning, connect, activeRunIdRef } = usePipelineSocket()
   const { height: panelHeight, onMouseDown: onDragStart } = useDragResize(360, 80, 700)
@@ -45,10 +47,20 @@ export default function App() {
     }, false)
   }, [status.is_running, status.active_run_id, connect, refresh, activeRunIdRef])
 
+  useEffect(() => {
+    if (fundsDismissedRef.current) return
+    const fundsEvent = events.find(e => e.type === 'insufficient_funds')
+    if (fundsEvent && fundsEvent.balance !== undefined && fundsEvent.estimated_cost !== undefined && !fundsAlert) {
+      setFundsAlert({ balance: fundsEvent.balance, estimated_cost: fundsEvent.estimated_cost })
+      pauseRun().then(() => setStatus(s => ({ ...s, is_paused: true }))).catch(() => {})
+    }
+  }, [events])
+
   async function handleRun() {
     setTriggering(true)
     try {
       const { run_id } = await triggerRun()
+      fundsDismissedRef.current = false
       setStatus(s => ({ ...s, is_running: true, is_paused: false, active_run_id: run_id }))
       connect(run_id, () => {
         setStatus(s => ({ ...s, is_running: false, is_paused: false, active_run_id: null }))
@@ -73,6 +85,7 @@ export default function App() {
         return
       }
       // Connect to WebSocket for real-time enrichment progress
+      fundsDismissedRef.current = false
       setStatus(s => ({ ...s, is_running: true, is_paused: false, active_run_id: result.run_id }))
       connect(result.run_id, () => {
         setStatus(s => ({ ...s, is_running: false, is_paused: false, active_run_id: null }))
@@ -221,7 +234,7 @@ export default function App() {
         <div className="flex flex-col min-h-0">
           <div className="text-xs text-gray-500 uppercase tracking-wide mb-2 font-semibold">Leads</div>
           <div className="flex-1 min-h-0">
-            <LeadsTable events={events} />
+            <LeadsTable events={events} runId={status.active_run_id} />
           </div>
         </div>
       </div>
@@ -242,6 +255,56 @@ export default function App() {
         />
       )}
       {showLeads && <LeadViewer onClose={() => setShowLeads(false)} />}
+
+      {fundsAlert && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-red-500/50 rounded-2xl p-8 max-w-md mx-4 text-center space-y-4">
+            <div className="text-4xl">💸</div>
+            <h2 className="text-xl font-bold text-red-400">get ur money up</h2>
+            <p className="text-gray-300">
+              You don't have enough USDC in your Base wallet to complete this run.
+            </p>
+            <div className="bg-gray-800 rounded-lg p-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-400">Balance:</span>
+                <span className="text-red-400 font-mono">${fundsAlert.balance.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Estimated need:</span>
+                <span className="text-white font-mono">~${fundsAlert.estimated_cost.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Wallet:</span>
+                <span className="text-gray-500 font-mono text-xs">0x254f...FBC1</span>
+              </div>
+            </div>
+            <p className="text-gray-500 text-xs">
+              Fund your wallet or continue with partial enrichment.
+            </p>
+            <div className="flex gap-3 justify-center mt-2">
+              <button
+                onClick={() => {
+                  fundsDismissedRef.current = true
+                  setFundsAlert(null)
+                  resumeRun().then(() => setStatus(s => ({ ...s, is_paused: false }))).catch(() => {})
+                }}
+                className="px-6 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg transition-colors"
+              >
+                Continue Anyway
+              </button>
+              <button
+                onClick={() => {
+                  fundsDismissedRef.current = true
+                  setFundsAlert(null)
+                }}
+                className="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )

@@ -85,3 +85,18 @@ def get_stats(conn) -> dict:
         }
     finally:
         cur.close()
+
+
+def get_leads_by_run_id(conn, run_id: int) -> list[dict]:
+    """Fetch all leads for a given pipeline run."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            'SELECT * FROM smb_leads WHERE run_id = %s ORDER BY id',
+            (run_id,),
+        )
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+        return [dict(zip(cols, row)) for row in rows]
+    finally:
+        cur.close()

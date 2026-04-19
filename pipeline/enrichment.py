@@ -340,13 +340,16 @@ def _step_company_contact_fallback(lead: dict, enriched: dict, meta: dict) -> fl
     use company-level contact fields so the table and outreach pipeline do not stay blank.
     """
     fallback = {}
-    company_email = _value(lead, enriched, 'email')
-    company_phone = _value(lead, enriched, 'phone')
+    company_email = _value(lead, enriched, 'company_email')
+    company_phone = _value(lead, enriched, 'company_phone')
     if not _value(lead, enriched, 'owner_email') and company_email:
         fallback['owner_email'] = company_email
     if not _value(lead, enriched, 'owner_phone') and company_phone:
         fallback['owner_phone'] = company_phone
-    _merge(enriched, meta, fallback, 'company_fallback')
+    if fallback:
+        for field, value in fallback.items():
+            enriched[field] = value
+            meta[field] = {'source': 'company_fallback', 'fallback': True}
     return 0.0
 
 
@@ -359,7 +362,8 @@ def _step_claude_discovery(lead: dict, enriched: dict, meta: dict) -> float:
         return 0.0
 
     known = {}
-    for key in ['company', 'address', 'city', 'state', 'industry', 'owner_linkedin', 'email', 'phone', 'website']:
+    for key in ['company', 'address', 'city', 'state', 'industry', 'owner_linkedin',
+                'company_email', 'company_phone', 'website']:
         value = _value(lead, enriched, key)
         if value:
             known[key] = value
@@ -402,7 +406,7 @@ def _step_claude_discovery(lead: dict, enriched: dict, meta: dict) -> float:
 # ── Step 2: Google Places details/match ─────────────────────────────────────
 
 def _step_google_places(lead: dict, enriched: dict, meta: dict) -> float:
-    target_fields = ['website', 'phone', 'google_maps_url', 'rating', 'review_count']
+    target_fields = ['website', 'company_phone', 'google_maps_url', 'rating', 'review_count']
     missing = [f for f in target_fields if not _value(lead, enriched, f)]
     if not missing and _value(lead, enriched, 'google_place_id'):
         return 0.0
@@ -437,7 +441,7 @@ def _step_google_places(lead: dict, enriched: dict, meta: dict) -> float:
         'google_place_id': matched_place_id,
         'google_maps_url': details.get('googleMapsUri'),
         'website': details.get('websiteUri'),
-        'phone': details.get('nationalPhoneNumber'),
+        'company_phone': details.get('nationalPhoneNumber'),
         'rating': details.get('rating'),
         'review_count': details.get('userRatingCount'),
         'company': _value(lead, enriched, 'company') or display_name.get('text'),
@@ -827,7 +831,7 @@ def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
             'Do not guess or infer email addresses or phone numbers. '
             'If a field is not clearly present, use null. '
             'Return ONLY JSON with keys: '
-            'email, phone, services_offered, year_established, '
+            'company_email, company_phone, services_offered, year_established, '
             'company_description, certifications, facebook_url, yelp_url, employee_count.\n\n'
             f'{evidence}'
         )
@@ -846,10 +850,10 @@ def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
             text = text.strip()
         result_data = json.loads(text)
         result = {}
-        if result_data.get('email'):
-            result['email'] = str(result_data['email'])
-        if result_data.get('phone'):
-            result['phone'] = str(result_data['phone'])
+        if result_data.get('company_email'):
+            result['company_email'] = str(result_data['company_email'])
+        if result_data.get('company_phone'):
+            result['company_phone'] = str(result_data['company_phone'])
         if result_data.get('services_offered'):
             val = result_data['services_offered']
             result['services_offered'] = val if isinstance(val, list) else [val]
@@ -933,7 +937,7 @@ def _step_claude_failsafe(lead: dict, enriched: dict, meta: dict) -> float:
     if set(missing).issubset(LOW_VALUE_CLAUDE_FIELDS):
         return 0.0
     known = {}
-    for k in ['company', 'owner_name', 'email', 'phone', 'address', 'city',
+    for k in ['company', 'owner_name', 'company_email', 'company_phone', 'address', 'city',
               'state', 'website', 'industry', 'rating', 'review_count',
               'ownership_type']:
         if lead.get(k):

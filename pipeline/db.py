@@ -18,7 +18,7 @@ def get_connection():
 
 
 LEAD_COLUMNS = [
-    'company', 'owner_name', 'email', 'phone', 'address', 'city', 'state',
+    'company', 'owner_name', 'company_email', 'company_phone', 'address', 'city', 'state',
     'zipcode', 'website', 'industry', 'google_place_id', 'rating',
     'review_count', 'ownership_type', 'distance_miles', 'latitude',
     'longitude', 'openmart_id', 'run_id',
@@ -32,7 +32,7 @@ LEAD_COLUMNS = [
 
 INSERT_LEAD_SQL = """
     INSERT INTO smb_leads (
-        company, owner_name, email, phone, address, city, state,
+        company, owner_name, company_email, company_phone, address, city, state,
         zipcode, website, industry, google_place_id, rating, review_count,
         ownership_type, distance_miles, latitude, longitude, openmart_id, run_id,
         owner_email, owner_phone, owner_linkedin,
@@ -181,8 +181,8 @@ def get_tier1_leads_for_run(run_id: int) -> list[dict]:
             SELECT company,
                    tier,
                    tier_reason,
-                   COALESCE(owner_phone, phone) AS best_phone,
-                   COALESCE(owner_email, email) AS best_email,
+                   COALESCE(owner_phone, company_phone) AS best_phone,
+                   COALESCE(owner_email, company_email) AS best_email,
                    owner_linkedin,
                    website,
                    city,

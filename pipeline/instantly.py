@@ -18,11 +18,11 @@ def _lead_to_instantly(lead: dict) -> dict:
     last      = parts[1] if len(parts) > 1 else ''
 
     return {
-        'email':        lead.get('owner_email') or lead.get('email') or '',
+        'email':        lead.get('owner_email') or lead.get('company_email') or '',
         'first_name':   first,
         'last_name':    last,
         'company_name': lead.get('company') or '',
-        'phone':        lead.get('phone') or '',
+        'phone':        lead.get('company_phone') or '',
         'website':      lead.get('website') or '',
         'custom_variables': {
             'industry':       lead.get('industry') or '',
@@ -51,7 +51,7 @@ def push_leads(leads: list[dict]) -> dict:
         raise ValueError('INSTANTLY_CAMPAIGN_ID is not set in .env')
 
     # Only push leads that have an email — Instantly requires it
-    with_email    = [l for l in leads if l.get('owner_email') or l.get('email')]
+    with_email    = [l for l in leads if l.get('owner_email') or l.get('company_email')]
     without_email = len(leads) - len(with_email)
 
     if not with_email:

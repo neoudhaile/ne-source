@@ -105,8 +105,8 @@ def normalize_lead(record, industry):
     return {
         'company':         company,
         'owner_name':      extract_owner(raw),
-        'email':           extract_email(raw),
-        'phone':           phones[0] if phones else None,
+        'company_email':   extract_email(raw),
+        'company_phone':   phones[0] if phones else None,
         'address':         raw.get('street_address'),
         'city':            raw.get('city'),
         'state':           raw.get('state') or 'CA',
@@ -182,8 +182,8 @@ def normalize_google_place(record, industry):
     return {
         'company': raw['company'],
         'owner_name': None,
-        'email': None,
-        'phone': raw['phone'],
+        'company_email': None,
+        'company_phone': raw['phone'],
         'address': raw['address'],
         'city': raw['city'],
         'state': raw['state'],

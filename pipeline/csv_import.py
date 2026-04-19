@@ -21,7 +21,7 @@ claude = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 # included — if the CSV already has them, we should use them and let the
 # waterfall skip those fields.
 MAPPABLE_COLUMNS = [
-    'company', 'owner_name', 'email', 'phone', 'address', 'city', 'state',
+    'company', 'owner_name', 'company_email', 'company_phone', 'address', 'city', 'state',
     'zipcode', 'website', 'industry', 'rating', 'review_count',
     'ownership_type', 'latitude', 'longitude',
     'owner_email', 'owner_phone', 'owner_linkedin',
@@ -100,9 +100,9 @@ Rules:
 - Map each CSV column to the most appropriate database column, or null if no match.
 - "company" = business name / company name / dba name
 - "owner_name" = owner / proprietor / contact name / principal
-- "email" = general business email (not owner-specific)
+- "company_email" = general business email (info@, contact@, sales@)
 - "owner_email" = owner's personal/professional email
-- "phone" = business phone
+- "company_phone" = business phone
 - "owner_phone" = owner's personal phone
 - "address" = street address (not city/state/zip — those are separate columns)
 - "industry" = business type / category / vertical / trade

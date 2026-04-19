@@ -635,8 +635,11 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
     global _x402_insufficient, _x402_consecutive_402s
     if _x402_insufficient:
         return 0.0
-    target_fields = ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin',
-                     'employee_count', 'key_staff']
+    owner_target_fields = ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin']
+    org_target_fields = ['year_established', 'revenue_estimate', 'company_description',
+                         'employee_count', 'facebook_url', 'services_offered',
+                         'company_phone', 'key_staff']
+    target_fields = owner_target_fields + org_target_fields
     missing = [f for f in target_fields if not (enriched.get(f) or lead.get(f))]
     if not missing:
         return 0.0
@@ -662,10 +665,10 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
             payload['email'] = owner_email
         if owner_name:
             payload['name'] = owner_name
-            payload['first_name'] = owner_name.split(' ')[0]
-            last = ' '.join(owner_name.split(' ')[1:])
-            if last:
-                payload['last_name'] = last
+            parts = owner_name.split(' ')
+            payload['first_name'] = parts[0]
+            if len(parts) > 1:
+                payload['last_name'] = ' '.join(parts[1:])
         session = _x402_session()
         resp = session.post(
             f'{ORTH_BASE}/apollo/api/v1/people/match',
@@ -693,8 +696,31 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
                 result['owner_phone'] = phones[0].get('sanitized_number') or phones[0].get('raw_number')
         if person.get('linkedin_url'):
             result['owner_linkedin'] = person['linkedin_url']
+        # Organization fields
+        if org.get('founded_year'):
+            try:
+                result['year_established'] = int(org['founded_year'])
+            except (ValueError, TypeError):
+                pass
+        if org.get('annual_revenue_printed'):
+            result['revenue_estimate'] = str(org['annual_revenue_printed'])
+        if org.get('short_description'):
+            result['company_description'] = str(org['short_description'])
         if org.get('estimated_num_employees'):
-            result['employee_count'] = org['estimated_num_employees']
+            try:
+                result['employee_count'] = int(org['estimated_num_employees'])
+            except (ValueError, TypeError):
+                pass
+        if org.get('facebook_url'):
+            result['facebook_url'] = str(org['facebook_url'])
+        keywords = org.get('keywords') or []
+        if keywords:
+            result['services_offered'] = [str(k) for k in keywords[:10]]
+        primary_phone = (org.get('primary_phone') or {}).get('sanitized_number')
+        if primary_phone:
+            result['company_phone'] = str(primary_phone)
+
+        # key_staff from top-level people list
         people_list = data.get('people') or []
         if people_list:
             staff = [p.get('name') for p in people_list[:5] if p.get('name')]

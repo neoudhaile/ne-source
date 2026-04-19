@@ -469,6 +469,27 @@ def _step_google_maps(lead: dict, enriched: dict, meta: dict) -> float:
 
 # ── Step 4: Hunter.io — email lookup ───────────────────────────────────────
 
+# Role precedence for Hunter owner selection (higher = better)
+HUNTER_ROLE_RANK = [
+    ('owner', 100), ('founder', 100), ('co-founder', 100),
+    ('president', 80),
+    ('ceo', 70), ('chief executive', 70),
+    ('principal', 60), ('managing partner', 60), ('partner', 55),
+    ('vp', 40), ('vice president', 40),
+]
+
+
+def _hunter_role_score(position: str | None) -> int:
+    if not position:
+        return 0
+    p = position.lower()
+    best = 0
+    for keyword, score in HUNTER_ROLE_RANK:
+        if keyword in p and score > best:
+            best = score
+    return best
+
+
 def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
     global _x402_insufficient, _x402_consecutive_402s
     if _x402_insufficient:
@@ -481,6 +502,7 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
     company = _value(lead, enriched, 'company')
     if not domain or not company:
         return 0.0
+
     last_error = None
     for attempt in range(HUNTER_RETRIES + 1):
         try:
@@ -500,54 +522,45 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
             data = resp.json()
             email_data = data.get('data', {}) or {}
             emails = email_data.get('emails', []) or []
-            result = {}
 
-            known_owner_name = _value(lead, enriched, 'owner_name')
-
-            def candidate_name(candidate: dict) -> str | None:
-                first = (candidate.get('first_name') or '').strip()
-                last = (candidate.get('last_name') or '').strip()
+            def candidate_name(c: dict) -> str | None:
+                first = (c.get('first_name') or '').strip()
+                last = (c.get('last_name') or '').strip()
                 full = ' '.join(part for part in (first, last) if part).strip()
                 return full or None
 
-            def candidate_phone(candidate: dict) -> str | None:
+            def candidate_phone(c: dict) -> str | None:
                 for key in ('phone_number', 'phone', 'mobile_phone', 'work_phone'):
-                    if candidate.get(key):
-                        return str(candidate[key]).strip()
+                    if c.get(key):
+                        return str(c[key]).strip()
                 return None
 
-            def candidate_linkedin(candidate: dict) -> str | None:
+            def candidate_linkedin(c: dict) -> str | None:
                 for key in ('linkedin', 'linkedin_url'):
-                    if candidate.get(key):
-                        return str(candidate[key]).strip()
+                    if c.get(key):
+                        return str(c[key]).strip()
                 return None
 
-            def candidate_score(candidate: dict) -> int:
-                score = 0
-                email = str(candidate.get('value') or '').strip()
-                if email:
-                    score += _email_quality(email)
-                confidence = candidate.get('confidence')
-                if isinstance(confidence, (int, float)):
-                    score += int(confidence)
-                person_name = candidate_name(candidate)
-                if person_name:
-                    score += _name_quality(person_name)
-                title = str(candidate.get('position') or candidate.get('department') or '').lower()
-                if any(keyword in title for keyword in OWNER_TITLE_KEYWORDS):
-                    score += 35
-                if known_owner_name and person_name:
-                    if person_name.lower() == str(known_owner_name).lower():
-                        score += 40
-                    else:
-                        known_tokens = set(str(known_owner_name).lower().split())
-                        person_tokens = set(person_name.lower().split())
-                        if known_tokens & person_tokens:
-                            score += 20
-                return score
+            def is_executive(c: dict) -> bool:
+                if (c.get('seniority') or '').lower() == 'executive':
+                    return True
+                position = (c.get('position') or '').lower()
+                return any(k in position for k in
+                           ('owner', 'founder', 'president', 'ceo', 'principal'))
 
-            ranked = sorted(emails, key=candidate_score, reverse=True)
-            best = ranked[0] if ranked else None
+            # Select owner: executives first, ranked by role then confidence.
+            executives = [c for c in emails if is_executive(c)]
+            if executives:
+                best = max(executives, key=lambda c: (
+                    _hunter_role_score(c.get('position')),
+                    c.get('confidence') or 0,
+                ))
+            elif emails:
+                best = max(emails, key=lambda c: c.get('confidence') or 0)
+            else:
+                best = None
+
+            result = {}
             if best:
                 if best.get('value'):
                     result['owner_email'] = str(best['value']).strip()
@@ -561,22 +574,28 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
                 if best_linkedin:
                     result['owner_linkedin'] = best_linkedin
 
+            # key_staff: all returned people as "Name — Position"
             staff = []
-            for candidate in ranked[:5]:
-                name = candidate_name(candidate)
-                if name and name not in staff:
-                    staff.append(name)
+            for c in emails:
+                name = candidate_name(c)
+                position = (c.get('position') or '').strip()
+                if name and position:
+                    entry = f'{name} — {position}'
+                elif name:
+                    entry = name
+                else:
+                    continue
+                if entry not in staff:
+                    staff.append(entry)
             if staff:
                 result['key_staff'] = staff
 
-            owner_name = result.get('owner_name') or known_owner_name
+            # email-finder follow-up (useful when owner_name came from scrape)
+            owner_name = result.get('owner_name') or _value(lead, enriched, 'owner_name')
             if owner_name:
                 try:
                     parts = str(owner_name).split()
-                    finder_params = {
-                        'domain': domain,
-                        'full_name': str(owner_name),
-                    }
+                    finder_params = {'domain': domain, 'full_name': str(owner_name)}
                     if parts:
                         finder_params['first_name'] = parts[0]
                     if len(parts) > 1:
@@ -596,12 +615,11 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
                     finder_data = finder_resp.json().get('data', {}) or {}
                     if finder_data.get('email'):
                         result['owner_email'] = str(finder_data['email']).strip()
-                    if finder_data.get('first_name') or finder_data.get('last_name'):
-                        first = str(finder_data.get('first_name') or '').strip()
-                        last = str(finder_data.get('last_name') or '').strip()
-                        full_name = ' '.join(part for part in (first, last) if part).strip()
-                        if full_name:
-                            result['owner_name'] = full_name
+                    first = str(finder_data.get('first_name') or '').strip()
+                    last = str(finder_data.get('last_name') or '').strip()
+                    full_name = ' '.join(p for p in (first, last) if p).strip()
+                    if full_name:
+                        result['owner_name'] = full_name
                     for key in ('linkedin', 'linkedin_url'):
                         if finder_data.get(key):
                             result['owner_linkedin'] = str(finder_data[key]).strip()

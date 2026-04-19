@@ -90,31 +90,35 @@ OWNER_FIELD_SOURCE_PRIORITY = {
     'owner_name': {
         'apollo': 100,
         'hunter': 80,
+        'fullenrich': 60,
+        'scrape': 50,
         'company_fallback': 10,
-        'claude_discovery': 5,
-        'scrape': 0,
         'claude_inferred': 0,
     },
     'owner_email': {
         'apollo': 100,
         'hunter': 90,
+        'fullenrich': 70,
         'company_fallback': 10,
         'claude_inferred': 0,
     },
     'owner_phone': {
         'apollo': 100,
         'hunter': 85,
+        'fullenrich': 70,
         'company_fallback': 10,
         'claude_inferred': 0,
     },
     'owner_linkedin': {
         'apollo': 100,
         'hunter': 70,
+        'fullenrich': 60,
         'claude_inferred': 0,
     },
     'key_staff': {
         'apollo': 100,
         'hunter': 60,
+        'fullenrich': 40,
         'claude_inferred': 0,
     },
 }
@@ -853,8 +857,9 @@ def _step_sixtyfour(lead: dict, enriched: dict, meta: dict) -> float:
 # ── Step 5: ScrapeGraphAI — website scrape ─────────────────────────────────
 
 def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
-    target_fields = ['services_offered', 'year_established', 'company_description',
-                     'certifications', 'facebook_url', 'yelp_url', 'employee_count']
+    target_fields = ['owner_name', 'services_offered', 'year_established',
+                     'company_description', 'certifications', 'facebook_url',
+                     'yelp_url', 'employee_count', 'company_email', 'company_phone']
     missing = [f for f in target_fields if not (enriched.get(f) or lead.get(f))]
     if not missing:
         return 0.0
@@ -873,10 +878,14 @@ def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
             'Extract company information from the website content below. '
             'Only return values that are explicitly supported by the text. '
             'Do not guess or infer email addresses or phone numbers. '
+            'For owner_name, look in About Us, Team, Leadership, or bio sections — '
+            'identify the Owner, Founder, Co-Founder, President, or CEO by name '
+            'when the role is explicit. If multiple owners, return the primary one. '
             'If a field is not clearly present, use null. '
             'Return ONLY JSON with keys: '
-            'company_email, company_phone, services_offered, year_established, '
-            'company_description, certifications, facebook_url, yelp_url, employee_count.\n\n'
+            'owner_name, company_email, company_phone, services_offered, '
+            'year_established, company_description, certifications, '
+            'facebook_url, yelp_url, employee_count.\n\n'
             f'{evidence}'
         )
         response = _claude_call_with_retry(
@@ -894,6 +903,8 @@ def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
             text = text.strip()
         result_data = json.loads(text)
         result = {}
+        if result_data.get('owner_name'):
+            result['owner_name'] = str(result_data['owner_name']).strip()
         if result_data.get('company_email'):
             result['company_email'] = str(result_data['company_email'])
         if result_data.get('company_phone'):

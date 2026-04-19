@@ -59,6 +59,7 @@ STEP_NAMES = {
     'google_maps': 'Google Maps URL',
     'hunter': 'Hunter.io',
     'apollo': 'Apollo',
+    'fullenrich': 'FullEnrich',
     'sixtyfour': 'Sixtyfour',
     'scrape_website': 'Website scrape',
     'scrape_reviews': 'Review scrape',
@@ -71,10 +72,11 @@ STEP_SKIP_REASONS = {
     'google_maps': 'No real Google place ID available.',
     'hunter': 'No website/domain available for owner-contact lookup.',
     'apollo': 'No usable owner/company context remained for people matching.',
+    'fullenrich': 'No FULLENRICH_API_KEY set, or all owner fields already filled.',
     'scrape_website': 'No website available to scrape, or no scraper fallback is configured.',
     'scrape_reviews': 'No review URL available to scrape, or no scraper fallback is configured.',
     'company_fallback': 'No company email or phone available to reuse.',
-    'claude_failsafe': 'No missing fields remained to infer.',
+    'claude_failsafe': 'No missing non-contact fields remained to infer.',
 }
 
 LOW_VALUE_CLAUDE_FIELDS = {
@@ -802,6 +804,36 @@ def _step_sixtyfour(lead: dict, enriched: dict, meta: dict) -> float:
     return cost
 
 
+# ── Step: FullEnrich — paid fallback for owner contact ────────────────────
+
+def _step_fullenrich(lead: dict, enriched: dict, meta: dict) -> float:
+    from pipeline import fullenrich
+    if not fullenrich.has_api_key():
+        return 0.0
+    target_fields = ['owner_name', 'owner_email', 'owner_phone']
+    missing = [f for f in target_fields if not _value(lead, enriched, f)]
+    if not missing:
+        return 0.0
+    company = _value(lead, enriched, 'company') or ''
+    if not company:
+        return 0.0
+    try:
+        result = fullenrich.enrich_person(
+            company=company,
+            domain=_domain_from_website(_value(lead, enriched, 'website')),
+            owner_name=_value(lead, enriched, 'owner_name'),
+            city=_value(lead, enriched, 'city'),
+            state=_value(lead, enriched, 'state'),
+            linkedin=_value(lead, enriched, 'owner_linkedin'),
+        )
+    except Exception as e:
+        raise RuntimeError(f'FullEnrich: {e}')
+    if not result:
+        return 0.0
+    _merge(enriched, meta, result, 'fullenrich')
+    return fullenrich.FULLENRICH_COST_PER_CALL
+
+
 # ── Step 5: ScrapeGraphAI — website scrape ─────────────────────────────────
 
 def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
@@ -1008,6 +1040,7 @@ _STEP_FN_NAMES = {
     'google_maps':       '_step_google_maps',
     'hunter':            '_step_hunter',
     'apollo':            '_step_apollo',
+    'fullenrich':        '_step_fullenrich',
     'scrape_website':    '_step_scrape_website',
     'scrape_reviews':    '_step_scrape_reviews',
     'company_fallback':  '_step_company_contact_fallback',

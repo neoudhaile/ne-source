@@ -985,8 +985,18 @@ def _step_scrape_reviews(lead: dict, enriched: dict, meta: dict) -> float:
 
 # ── Step 7: Claude failsafe ───────────────────────────────────────────────
 
+# Fields Claude failsafe is allowed to infer (non-contact only)
+CLAUDE_FAILSAFE_FIELDS = {
+    'employee_count', 'key_staff', 'year_established', 'services_offered',
+    'company_description', 'revenue_estimate', 'certifications',
+    'review_summary', 'facebook_url', 'yelp_url',
+}
+
+
 def _step_claude_failsafe(lead: dict, enriched: dict, meta: dict) -> float:
     missing = _get_missing(lead, enriched)
+    # Only consider fields the failsafe is allowed to fill.
+    missing = [f for f in missing if f in CLAUDE_FAILSAFE_FIELDS]
     if not missing:
         return 0.0
     if set(missing).issubset(LOW_VALUE_CLAUDE_FIELDS):
@@ -1004,14 +1014,15 @@ def _step_claude_failsafe(lead: dict, enriched: dict, meta: dict) -> float:
     prompt = (
         f'I have the following data about a company:\n\n'
         f'{json.dumps(known, indent=2, default=str)}\n\n'
-        f'I am missing these fields: {", ".join(missing)}\n\n'
-        f'Based on the company name, location, industry, website, and any other '
-        f'context above, infer reasonable values for the missing fields. '
+        f'Infer reasonable values for these missing NON-CONTACT fields: '
+        f'{", ".join(missing)}\n\n'
+        f'IMPORTANT: You MUST NOT invent or guess owner_name, owner_email, owner_phone, '
+        f'or owner_linkedin. Only the fields listed above are allowed. '
         f'For text[] fields (key_staff, services_offered, certifications), return JSON arrays. '
         f'For employee_count and year_established, return integers. '
         f'For all others, return strings. '
         f'If you truly cannot infer a value, use null.\n\n'
-        f'Return ONLY a JSON object with the missing field names as keys.'
+        f'Return ONLY a JSON object with the listed field names as keys.'
     )
 
     try:
@@ -1030,6 +1041,9 @@ def _step_claude_failsafe(lead: dict, enriched: dict, meta: dict) -> float:
             text = text.strip()
         inferred = json.loads(text)
         for k, v in inferred.items():
+            # Hard guardrail: never write contact fields even if Claude returned them.
+            if k not in CLAUDE_FAILSAFE_FIELDS:
+                continue
             if k in missing and v is not None:
                 enriched[k] = v
                 meta[k] = {'source': 'claude_inferred'}

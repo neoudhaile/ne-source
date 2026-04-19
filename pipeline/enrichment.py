@@ -55,7 +55,6 @@ ENRICHABLE_FIELDS = [
 ORTH_BASE = 'https://x402.orth.sh'
 
 STEP_NAMES = {
-    'claude_discovery': 'Claude discovery',
     'google_places': 'Google Places',
     'google_maps': 'Google Maps URL',
     'hunter': 'Hunter.io',
@@ -68,7 +67,6 @@ STEP_NAMES = {
 }
 
 STEP_SKIP_REASONS = {
-    'claude_discovery': 'No company context available to infer website, or website already exists.',
     'google_places': 'No company/address data available for place matching, or no place match found.',
     'google_maps': 'No real Google place ID available.',
     'hunter': 'No website/domain available for owner-contact lookup.',
@@ -355,56 +353,6 @@ def _step_company_contact_fallback(lead: dict, enriched: dict, meta: dict) -> fl
             enriched[field] = value
             meta[field] = {'source': 'company_fallback', 'fallback': True}
     return 0.0
-
-
-# ── Step 1: Claude discovery ────────────────────────────────────────────────
-
-def _step_claude_discovery(lead: dict, enriched: dict, meta: dict) -> float:
-    target_fields = ['website']
-    missing = [f for f in target_fields if not _value(lead, enriched, f)]
-    if not missing:
-        return 0.0
-
-    known = {}
-    for key in ['company', 'address', 'city', 'state', 'industry', 'owner_linkedin',
-                'company_email', 'company_phone', 'website']:
-        value = _value(lead, enriched, key)
-        if value:
-            known[key] = value
-    if not known.get('company'):
-        return 0.0
-
-    prompt = (
-        'You are preparing lookup fields for downstream enrichment of a small/medium business. '
-        'Use the known business context below to infer a likely website. '
-        'Do not invent contact data (emails, phones). If you cannot determine a field, return null.\n\n'
-        f'{json.dumps(known, indent=2, default=str)}\n\n'
-        'Return ONLY JSON with key: website.'
-    )
-
-    try:
-        response = _claude_call_with_retry(
-            lambda: claude.messages.create(
-                model='claude-haiku-4-5-20251001',
-                max_tokens=200,
-                messages=[{'role': 'user', 'content': prompt}],
-            )
-        )
-        text = response.content[0].text
-        if '```' in text:
-            text = text.split('```')[1]
-            if text.startswith('json'):
-                text = text[4:]
-            text = text.strip()
-        result_data = json.loads(text)
-        result = {}
-        if result_data.get('website') and not _value(lead, enriched, 'website'):
-            result['website'] = str(result_data['website']).strip()
-        _merge(enriched, meta, result, 'claude_discovery')
-        cost = (response.usage.input_tokens * 0.003 + response.usage.output_tokens * 0.015) / 1000
-        return cost
-    except Exception as e:
-        raise RuntimeError(f'Claude discovery: {e}')
 
 
 # ── Step 2: Google Places details/match ─────────────────────────────────────
@@ -1056,7 +1004,6 @@ def _step_claude_failsafe(lead: dict, enriched: dict, meta: dict) -> float:
 # ── Main entry point ───────────────────────────────────────────────────────
 
 _STEP_FN_NAMES = {
-    'claude_discovery':  '_step_claude_discovery',
     'google_places':     '_step_google_places',
     'google_maps':       '_step_google_maps',
     'hunter':            '_step_hunter',
@@ -1067,7 +1014,7 @@ _STEP_FN_NAMES = {
     'claude_failsafe':   '_step_claude_failsafe',
 }
 
-PHASE_1 = ['claude_discovery', 'google_places', 'google_maps']
+PHASE_1 = ['google_places', 'google_maps']
 PHASE_2 = ['hunter', 'scrape_website']
 PHASE_3 = ['apollo', 'scrape_reviews', 'company_fallback', 'claude_failsafe']
 

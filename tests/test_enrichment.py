@@ -87,7 +87,6 @@ def test_step_registry_allows_patching():
         return 0.01
 
     with patch.object(mod, '_step_hunter', fake_hunter), \
-         patch.object(mod, '_step_claude_discovery', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_apollo', lambda l, e, m: 0.0), \
@@ -116,8 +115,7 @@ def test_all_steps_execute_in_order():
             return 0.0
         return step_fn
 
-    with patch.object(mod, '_step_claude_discovery', make_step('claude_discovery')), \
-         patch.object(mod, '_step_google_places', make_step('google_places')), \
+    with patch.object(mod, '_step_google_places', make_step('google_places')), \
          patch.object(mod, '_step_google_maps', make_step('google_maps')), \
          patch.object(mod, '_step_hunter', make_step('hunter')), \
          patch.object(mod, '_step_apollo', make_step('apollo')), \
@@ -131,7 +129,7 @@ def test_all_steps_execute_in_order():
         mod.enrich_lead(1)
 
     expected = [
-        'claude_discovery', 'google_places', 'google_maps',
+        'google_places', 'google_maps',
         'hunter', 'apollo', 'scrape_website',
         'scrape_reviews', 'company_fallback', 'claude_failsafe',
     ]
@@ -154,8 +152,7 @@ def test_phase2_runs_parallel():
             return 0.01
         return step_fn
 
-    with patch.object(mod, '_step_claude_discovery', lambda l, e, m: 0.0), \
-         patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
+    with patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_hunter', make_slow_step('hunter')), \
          patch.object(mod, '_step_apollo', make_slow_step('apollo')), \
@@ -196,8 +193,7 @@ def test_phase2_merge_order_deterministic():
         meta['owner_email'] = {'source': 'apollo'}
         return 0.01
 
-    with patch.object(mod, '_step_claude_discovery', lambda l, e, m: 0.0), \
-         patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
+    with patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_hunter', hunter_email), \
          patch.object(mod, '_step_apollo', apollo_email), \
@@ -225,8 +221,7 @@ def test_phase2_error_isolation():
         meta['owner_linkedin'] = {'source': 'apollo'}
         return 0.01
 
-    with patch.object(mod, '_step_claude_discovery', lambda l, e, m: 0.0), \
-         patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
+    with patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_hunter', failing_hunter), \
          patch.object(mod, '_step_apollo', working_apollo), \
@@ -264,8 +259,7 @@ def test_phase1_runs_before_phase2():
             return 0.0
         return step_fn
 
-    with patch.object(mod, '_step_claude_discovery', phase1_step('claude_discovery')), \
-         patch.object(mod, '_step_google_places', phase1_step('google_places')), \
+    with patch.object(mod, '_step_google_places', phase1_step('google_places')), \
          patch.object(mod, '_step_google_maps', phase1_step('google_maps')), \
          patch.object(mod, '_step_hunter', phase2_step('hunter')), \
          patch.object(mod, '_step_apollo', phase2_step('apollo')), \
@@ -295,8 +289,7 @@ def test_batch_enrichment_faster_than_sequential():
             return 0.01
         return step_fn
 
-    with patch.object(mod, '_step_claude_discovery', make_slow_step('discovery')), \
-         patch.object(mod, '_step_google_places', make_slow_step('places')), \
+    with patch.object(mod, '_step_google_places', make_slow_step('places')), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_hunter', make_slow_step('hunter')), \
          patch.object(mod, '_step_apollo', make_slow_step('apollo')), \
@@ -336,8 +329,7 @@ def test_batch_enrichment_data_integrity():
     def capture_update(lead_id, data):
         updated_leads[lead_id] = data.copy()
 
-    with patch.object(mod, '_step_claude_discovery', lambda l, e, m: 0.0), \
-         patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
+    with patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_hunter', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_apollo', lambda l, e, m: 0.0), \
@@ -367,8 +359,7 @@ def test_emit_events_fire_for_all_steps():
     def capture_emit(event):
         events.append(event)
 
-    with patch.object(mod, '_step_claude_discovery', lambda l, e, m: 0.0), \
-         patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
+    with patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_hunter', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_apollo', lambda l, e, m: 0.0), \
@@ -381,8 +372,8 @@ def test_emit_events_fire_for_all_steps():
 
         mod.enrich_lead(1, emit=capture_emit)
 
-    # 9 steps x 2 events each (start + done/skip) = 18 events
+    # 8 steps x 2 events each (start + done/skip) = 16 events
     start_events = [e for e in events if e['type'] == 'enrich_step_start']
     end_events = [e for e in events if e['type'] in ('enrich_step_done', 'enrich_step_skip', 'enrich_step_error')]
-    assert len(start_events) == 9, f"Expected 9 start events, got {len(start_events)}"
-    assert len(end_events) == 9, f"Expected 9 end events, got {len(end_events)}"
+    assert len(start_events) == 8, f"Expected 8 start events, got {len(start_events)}"
+    assert len(end_events) == 8, f"Expected 8 end events, got {len(end_events)}"

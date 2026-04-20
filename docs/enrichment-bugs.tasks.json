@@ -3,9 +3,9 @@
     {
       "id": 1,
       "title": "Fix Google Places matching failure (15/19 leads get zero enrichment)",
-      "status": "todo",
+      "status": "fixed",
       "priority": "critical",
-      "notes": "Root blocker — all other steps cascade-fail when this fails. Investigate: minRating filter, geo bounding box, stopword stripping in _normalize_text."
+      "notes": "Fixed: added _search_for_enrichment() without minRating/locationRestriction filters. Reduced stopwords to corporate suffixes only."
     },
     {
       "id": 2,

@@ -21,11 +21,14 @@ Out of 19 leads, only 4 get any enrichment. The other 15 exit the waterfall comp
 - **Likely issue:** The Google Places search itself may return zero candidates for these queries. The `minRating` filter in `search_text()` requires a minimum rating — companies without any reviews/rating would be excluded by Google. OR the `locationRestriction` bounding box around LA is filtering out companies in Palmdale, Temecula, etc. if they're outside the configured radius.
 - **Also possible:** The `_normalize_text` stopword stripping is too aggressive — after removing "water", "district", "municipal", "services", etc., what's left may not match anything.
 
-**Next steps:**
-1. Add debug logging to `find_place()` to see if Google returns zero candidates vs candidates that fail scoring.
-2. Check if `minRating` is filtering out unrated businesses.
-3. Check if `GEO_RADIUS_MILES` bounding box excludes cities like Temecula, Palmdale, Calabasas.
-4. Review if stopword stripping is causing name mismatches.
+**Root causes found (2026-04-20):**
+1. `search_text()` passes `minRating: 3.5` to Google — companies with no ratings are excluded entirely.
+2. `search_text()` uses `locationRestriction` with a 40-mile box from downtown LA — Temecula (~85mi), Palmdale (~60mi), Murrieta (~80mi) are all outside.
+3. `_normalize_text()` strips `district`, `water`, `municipal`, `services`, `department` — "Palmdale Water District" becomes just "palmdale", killing name similarity scoring.
+
+**Fix applied:**
+- Added `_search_for_enrichment()` — calls Google Places Text Search without `minRating` or `locationRestriction` filters. Used by `find_place()` during enrichment.
+- Reduced `_normalize_text()` stopwords to only corporate suffixes (inc, llc, ltd, co, company, corp, corporation). Domain-meaningful words like water, district, municipal now preserved.
 
 ---
 
@@ -81,3 +84,4 @@ Out of 19 leads, only 4 get any enrichment. The other 15 exit the waterfall comp
 | Date | Change |
 |------|--------|
 | 2026-04-20 | Initial investigation doc created. 4 bugs identified from runs 53/54. |
+| 2026-04-20 | Bug 1 fix: added unfiltered search for enrichment, reduced stopwords. |

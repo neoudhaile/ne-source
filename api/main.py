@@ -156,7 +156,7 @@ def _format_log_event(ev: dict) -> str:
             return f"✓ {company} → {step} ({elapsed}s, ${cost:.3f}) — {fields}"
         return f"✓ {company} → {step} ({elapsed}s, ${cost:.3f})"
     if t == 'enrich_step_skip':
-        return f"· {company} → {step} — {ev.get('reason', ev.get('message', 'skipped'))}"
+        return f"· {company} → {step} — {ev.get('detail', ev.get('reason', ev.get('message', 'skipped')))}"
     if t == 'generate_done':
         return f"Generated email for {company}"
     if t == 'generate_start':

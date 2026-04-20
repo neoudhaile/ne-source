@@ -18,10 +18,12 @@ export function RunHistoryDrawer({
   runs,
   onClose,
   onDownloadTier1,
+  onDownloadLogs,
 }: {
   runs: RunRecord[]
   onClose: () => void
   onDownloadTier1: (runId: number) => void
+  onDownloadLogs: (runId: number) => void
 }) {
   return (
     <>
@@ -66,13 +68,22 @@ export function RunHistoryDrawer({
                 <div className="text-red-400 text-xs">{run.error_message}</div>
               )}
               {run.status === 'completed' && (
-                <button
-                  onClick={() => onDownloadTier1(run.id)}
-                  className="mt-2 inline-flex items-center gap-1.5 text-xs text-gray-300 hover:text-white border border-gray-600 hover:border-gray-400 rounded px-2 py-1 transition-colors"
-                >
-                  <Download size={12} />
-                  Download Tier 1 Brief
-                </button>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => onDownloadTier1(run.id)}
+                    className="inline-flex items-center gap-1.5 text-xs text-gray-300 hover:text-white border border-gray-600 hover:border-gray-400 rounded px-2 py-1 transition-colors"
+                  >
+                    <Download size={12} />
+                    Lead Brief
+                  </button>
+                  <button
+                    onClick={() => onDownloadLogs(run.id)}
+                    className="inline-flex items-center gap-1.5 text-xs text-gray-300 hover:text-white border border-gray-600 hover:border-gray-400 rounded px-2 py-1 transition-colors"
+                  >
+                    <Download size={12} />
+                    Logs
+                  </button>
+                </div>
               )}
             </div>
           ))}

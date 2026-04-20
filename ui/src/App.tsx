@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Menu, Play, Pause, Loader2, GripHorizontal, Upload } from 'lucide-react'
-import { triggerRun, getRuns, getStatus, getConfig, uploadCsv, pauseRun, resumeRun, downloadTier1Export } from './api'
+import { triggerRun, getRuns, getStatus, getConfig, uploadCsv, pauseRun, resumeRun, downloadTier1Export, downloadRunLogs } from './api'
 import { usePipelineSocket } from './hooks/usePipelineSocket'
 import { useDragResize } from './hooks/useDragResize'
 import { PipelineGraph } from './components/PipelineGraph'
@@ -245,6 +245,7 @@ export default function App() {
           runs={runs}
           onClose={() => setShowHistory(false)}
           onDownloadTier1={(runId) => downloadTier1Export(runId)}
+          onDownloadLogs={(runId) => downloadRunLogs(runId)}
         />
       )}
       {showConfig && config && (

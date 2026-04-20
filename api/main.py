@@ -106,66 +106,176 @@ def get_run(run_id: int):
         conn.close()
 
 
+@app.get('/api/runs/{run_id}/logs')
+def download_run_logs(run_id: int):
+    logs = runner.get_run_logs(run_id)
+    if logs is None:
+        raise HTTPException(status_code=404, detail='No logs found for this run (logs are kept in memory for the last 10 runs)')
+
+    lines: list[str] = []
+    for ev in logs:
+        lines.append(_format_log_event(ev))
+
+    filename = f'run-{run_id}.log'
+    return PlainTextResponse(
+        '\n'.join(lines),
+        media_type='text/plain',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
+def _format_log_event(ev: dict) -> str:
+    t = ev.get('type', '?')
+    company = ev.get('company', '')
+    step = ev.get('step', '')
+
+    if t == 'done':
+        return f"Run complete — Inserted: {ev.get('inserted', 0)} | Geo: {ev.get('skipped_geo', 0)} | Dupes: {ev.get('skipped_dupe', 0)}"
+    if t == 'error':
+        return f"ERROR: {ev.get('message', ev.get('error', '?'))}"
+    if t == 'tier_result':
+        return f"{company} → {ev.get('tier', '?')} · {ev.get('tier_reason', '')}"
+    if t == 'tier_done':
+        return f"Tiering complete — {ev.get('kept', 0)} kept, {ev.get('removed', 0)} removed"
+    if t == 'tier_start':
+        return f"Tiering {ev.get('count', '?')} leads..."
+    if t == 'enrich_start':
+        return f"Enriching {ev.get('count', '?')} leads..."
+    if t == 'enrich_done':
+        return f"Enrichment complete — {ev.get('count', ev.get('total', '?'))} leads enriched"
+    if t == 'enrich_lead_done':
+        sources = ', '.join(ev.get('sources', [])) or 'no sources'
+        return f"Enriched {company} ({ev.get('index', '?')}/{ev.get('total', '?')}) — {sources}"
+    if t == 'enrich_step_start':
+        return f"⟳ {company} → {step}"
+    if t == 'enrich_step_done':
+        fields = ', '.join(ev.get('fields_filled', []))
+        elapsed = ev.get('elapsed', 0)
+        cost = ev.get('cost', 0)
+        if fields:
+            return f"✓ {company} → {step} ({elapsed}s, ${cost:.3f}) — {fields}"
+        return f"✓ {company} → {step} ({elapsed}s, ${cost:.3f})"
+    if t == 'enrich_step_skip':
+        return f"· {company} → {step} — {ev.get('reason', ev.get('message', 'skipped'))}"
+    if t == 'generate_done':
+        return f"Generated email for {company}"
+    if t == 'generate_start':
+        return f"Generating emails for {ev.get('count', '?')} leads..."
+    if t == 'search_start':
+        return f"Searching: {ev.get('query', '?')} in {ev.get('city', '?')}"
+    if t == 'search_done':
+        return f"Search complete — {ev.get('count', '?')} results"
+    if t == 'search_batch':
+        return f"Batch: +{ev.get('batch_inserted', 0)} inserted, {ev.get('batch_rejected', 0)} rejected"
+    if t == 'csv_start':
+        return f"CSV import pipeline started"
+    if t == 'csv_lead':
+        return f"+ {company} — {ev.get('tier', '?')} · {ev.get('industry', 'Unknown')}"
+    if t == 'insufficient_funds':
+        return f"Insufficient funds — balance: ${ev.get('balance', 0):.2f}, estimated: ${ev.get('estimated_cost', 0):.2f}"
+    if t == 'paused':
+        return "Run paused"
+    if t == 'resumed':
+        return "Run resumed"
+    if t == 'export_start':
+        return f"Notion export starting — {ev.get('count', '?')} leads"
+    if t == 'export_lead':
+        return f"Exported {company} ({ev.get('index', '?')}/{ev.get('total', '?')})"
+    if t == 'export_skip':
+        return f"Skipped lead · {ev.get('reason', ev.get('message', ''))}"
+    if t == 'export_done':
+        return f"Notion export complete — {ev.get('exported', 0)} exported, {ev.get('skipped', 0)} skipped, {ev.get('errors', 0)} errors"
+    if t == 'export_error':
+        return f"Notion export error: {ev.get('error', ev.get('message', '?'))}"
+
+    # Fallback: dump the event type and any message/detail
+    msg = ev.get('message', ev.get('detail', ''))
+    return f"[{t}] {company} {msg}".strip()
+
+
 @app.get('/api/runs/{run_id}/tier1-export')
 def export_tier1_leads(run_id: int):
     leads = get_tier1_leads_for_run(run_id)
     if not leads:
-        raise HTTPException(status_code=404, detail='No Tier 1 leads found for this run')
+        raise HTTPException(status_code=404, detail='No tiered leads found for this run')
 
     lines = [
-        f'# Tier 1 Outreach Brief — Run #{run_id}',
+        f'# Outreach Brief — Run #{run_id}',
         '',
     ]
+    def _fmt_list(val):
+        if isinstance(val, list):
+            return ', '.join(str(s) for s in val) if val else '—'
+        return str(val) if val else '—'
+
+    def _fmt(val):
+        if val is None or val == '':
+            return '—'
+        return str(val)
+
     for lead in leads:
-        phone = lead.get('best_phone') or 'No phone found'
-        services = lead.get('services_offered') or []
-        certifications = lead.get('certifications') or []
-        description = lead.get('company_description') or f'{lead.get("industry") or "Business"} in {lead.get("city") or "unknown location"}.'
-
-        if isinstance(services, list):
-            services_text = ', '.join(str(s) for s in services[:6]) if services else '—'
-        else:
-            services_text = str(services) if services else '—'
-
-        if isinstance(certifications, list):
-            certs_text = ', '.join(str(s) for s in certifications[:6]) if certifications else '—'
-        else:
-            certs_text = str(certifications) if certifications else '—'
+        location_parts = [lead.get('address'), lead.get('city'), lead.get('state'), lead.get('zipcode')]
+        location = ', '.join(p for p in location_parts if p) or '—'
 
         lines.extend([
             f'## {lead.get("company") or "Unknown company"}',
-            f'Tier: Tier 1',
-            f'Tier Reason: {lead.get("tier_reason") or "—"}',
-            f'Phone: {phone}',
-            f'Email: {lead.get("best_email") or "—"}',
-            f'Website: {lead.get("website") or "—"}',
-            f'LinkedIn: {lead.get("owner_linkedin") or "—"}',
-            f'Location: {", ".join(part for part in [lead.get("city"), lead.get("state")] if part) or "—"}',
-            f'Industry: {lead.get("industry") or "—"}',
-            f'Employees: {lead.get("employee_count") or "—"}',
-            f'Year Established: {lead.get("year_established") or "—"}',
-            f'Revenue: {lead.get("revenue_estimate") or "—"}',
+            '',
+            '### Classification',
+            f'- **Tier:** {(lead.get("tier") or "unknown").replace("_", " ").title()}',
+            f'- **Tier Reason:** {_fmt(lead.get("tier_reason"))}',
+            f'- **Industry:** {_fmt(lead.get("industry"))}',
+            f'- **Ownership Type:** {_fmt(lead.get("ownership_type"))}',
+            '',
+            '### Contact — Owner',
+            f'- **Owner Name:** {_fmt(lead.get("owner_name"))}',
+            f'- **Owner Email:** {_fmt(lead.get("owner_email"))}',
+            f'- **Owner Phone:** {_fmt(lead.get("owner_phone"))}',
+            f'- **Owner LinkedIn:** {_fmt(lead.get("owner_linkedin"))}',
+            '',
+            '### Contact — Company',
+            f'- **Email:** {_fmt(lead.get("email"))}',
+            f'- **Phone:** {_fmt(lead.get("phone"))}',
+            f'- **Website:** {_fmt(lead.get("website"))}',
+            '',
+            '### Location',
+            f'- **Address:** {location}',
+            f'- **Latitude:** {_fmt(lead.get("latitude"))}',
+            f'- **Longitude:** {_fmt(lead.get("longitude"))}',
+            f'- **Distance (mi):** {_fmt(lead.get("distance_miles"))}',
+            '',
+            '### Company Details',
+            f'- **Employee Count:** {_fmt(lead.get("employee_count"))}',
+            f'- **Year Established:** {_fmt(lead.get("year_established"))}',
+            f'- **Revenue Estimate:** {_fmt(lead.get("revenue_estimate"))}',
+            f'- **Rating:** {_fmt(lead.get("rating"))}',
+            f'- **Review Count:** {_fmt(lead.get("review_count"))}',
+            f'- **Key Staff:** {_fmt_list(lead.get("key_staff"))}',
             '',
             '### Company Summary',
-            description,
+            lead.get('company_description') or f'{lead.get("industry") or "Business"} in {lead.get("city") or "unknown location"}.',
             '',
             '### Services',
-            services_text,
+            _fmt_list(lead.get('services_offered')),
             '',
             '### Certifications',
-            certs_text,
+            _fmt_list(lead.get('certifications')),
             '',
             '### Reviews',
-            lead.get('review_summary') or '—',
+            _fmt(lead.get('review_summary')),
             '',
             '### Links',
-            f'- Google Maps: {lead.get("google_maps_url") or "—"}',
-            f'- Facebook: {lead.get("facebook_url") or "—"}',
-            f'- Yelp: {lead.get("yelp_url") or "—"}',
+            f'- **Google Maps:** {_fmt(lead.get("google_maps_url"))}',
+            f'- **Facebook:** {_fmt(lead.get("facebook_url"))}',
+            f'- **Yelp:** {_fmt(lead.get("yelp_url"))}',
+            '',
+            '### Generated Outreach',
+            f'- **Subject:** {_fmt(lead.get("generated_subject"))}',
+            '',
+            lead.get('generated_email') or '—',
             '',
         ])
 
-    filename = f'tier1-run-{run_id}.md'
+    filename = f'leads-run-{run_id}.md'
     return PlainTextResponse(
         '\n'.join(lines),
         media_type='text/markdown',

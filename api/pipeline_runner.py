@@ -21,6 +21,25 @@ pause_event = threading.Event()
 pause_event.set()
 active_emit = None
 
+# ---------- per-run log storage (in-memory, last N runs) ----------
+MAX_STORED_RUNS = 10
+run_logs: dict[int, list[dict]] = {}
+_run_log_order: list[int] = []
+
+
+def _store_event(run_id: int, event: dict):
+    if run_id not in run_logs:
+        run_logs[run_id] = []
+        _run_log_order.append(run_id)
+        while len(_run_log_order) > MAX_STORED_RUNS:
+            old = _run_log_order.pop(0)
+            run_logs.pop(old, None)
+    run_logs[run_id].append(event)
+
+
+def get_run_logs(run_id: int) -> list[dict] | None:
+    return run_logs.get(run_id)
+
 
 def _wait_if_paused():
     while not pause_event.is_set():
@@ -70,6 +89,7 @@ async def start_run() -> int:
 
     def emit(event):
         event['run_id'] = run_id
+        _store_event(run_id, event)
         if event.get('type') == 'done':
             run_result.update(event)
         loop.call_soon_threadsafe(queue.put_nowait, event)
@@ -137,6 +157,7 @@ async def start_csv_run(lead_ids: list[int]) -> int:
 
     def emit(event):
         event['run_id'] = run_id
+        _store_event(run_id, event)
         if event.get('type') == 'done':
             run_result.update(event)
         loop.call_soon_threadsafe(queue.put_nowait, event)

@@ -95,3 +95,7 @@ export function openRunSocket(runId: number, onEvent: (e: PipelineEvent) => void
 export function downloadTier1Export(runId: number) {
   window.open(`/api/runs/${runId}/tier1-export`, '_blank')
 }
+
+export function downloadRunLogs(runId: number) {
+  window.open(`/api/runs/${runId}/logs`, '_blank')
+}

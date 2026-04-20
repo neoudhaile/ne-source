@@ -178,29 +178,10 @@ def get_tier1_leads_for_run(run_id: int) -> list[dict]:
         ensure_run_column(conn)
         cur.execute(
             '''
-            SELECT company,
-                   tier,
-                   tier_reason,
-                   COALESCE(owner_phone, company_phone) AS best_phone,
-                   COALESCE(owner_email, company_email) AS best_email,
-                   owner_linkedin,
-                   website,
-                   city,
-                   state,
-                   industry,
-                   employee_count,
-                   year_established,
-                   revenue_estimate,
-                   services_offered,
-                   company_description,
-                   certifications,
-                   review_summary,
-                   facebook_url,
-                   yelp_url,
-                   google_maps_url
+            SELECT *
             FROM smb_leads
-            WHERE run_id = %s AND tier = 'tier_1'
-            ORDER BY company ASC
+            WHERE run_id = %s AND tier IN ('tier_1', 'tier_2', 'tier_3')
+            ORDER BY tier ASC, company ASC
             ''',
             (run_id,),
         )

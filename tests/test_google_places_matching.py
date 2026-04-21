@@ -11,7 +11,7 @@ def test_find_place_rejects_candidate_with_wrong_name_and_address():
         'formattedAddress': '17140 S Avalon Blvd, Carson, CA 90746',
     }]
 
-    with patch.object(mod, 'search_text', return_value=(places, None)), \
+    with patch.object(mod, '_search_for_enrichment', return_value=places), \
          patch.object(mod, 'get_place_details') as mock_details:
         result = mod.find_place(
             'Western Municipal Water District',
@@ -39,7 +39,7 @@ def test_find_place_accepts_close_name_and_address_match():
         'websiteUri': 'https://example.com',
     }
 
-    with patch.object(mod, 'search_text', return_value=(places, None)), \
+    with patch.object(mod, '_search_for_enrichment', return_value=places), \
          patch.object(mod, 'get_place_details', return_value=details) as mock_details:
         result = mod.find_place(
             'Western Municipal Water District',

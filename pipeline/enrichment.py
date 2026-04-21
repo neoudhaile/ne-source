@@ -1041,14 +1041,23 @@ def _step_claude_failsafe(lead: dict, enriched: dict, meta: dict) -> float:
     )
 
     if not has_evidence and not has_identity:
+        meta['__skip_reason'] = (
+            'No grounded API evidence and no company identity (name + city/address) '
+            'to anchor inference.'
+        )
         return 0.0
 
     missing = _get_missing(lead, enriched)
     # Only consider fields the failsafe is allowed to fill.
     missing = [f for f in missing if f in CLAUDE_FAILSAFE_FIELDS]
     if not missing:
+        meta['__skip_reason'] = 'All allowed failsafe fields are already populated.'
         return 0.0
     if has_evidence and set(missing).issubset(LOW_VALUE_CLAUDE_FIELDS):
+        meta['__skip_reason'] = (
+            f'Only low-value fields remained ({", ".join(sorted(missing))}); '
+            f'skipped to save tokens.'
+        )
         return 0.0
     known = {}
     for k in ['company', 'owner_name', 'company_email', 'company_phone', 'address', 'city',
@@ -1161,10 +1170,13 @@ def _run_step(step_key, lead, enriched, meta, emit, company):
             field_sources[k] = (meta.get(k) or {}).get('provider') or (meta.get(k) or {}).get('source')
         event_type = 'enrich_step_done'
         detail = None
+        dynamic_reason = meta.pop('__skip_reason', None)
         if not fields_filled and cost == 0.0:
             event_type = 'enrich_step_skip'
             if _x402_insufficient and step_key in ('hunter', 'apollo'):
                 detail = 'Skipped — insufficient x402 balance'
+            elif dynamic_reason:
+                detail = dynamic_reason
             else:
                 detail = STEP_SKIP_REASONS.get(step_key, 'Step ran but produced no new fields.')
         emit({

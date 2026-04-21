@@ -10,9 +10,9 @@
     {
       "id": 2,
       "title": "Fix Claude failsafe skip reason + consider weaker mode for zero-enrichment leads",
-      "status": "todo",
+      "status": "fixed",
       "priority": "high",
-      "notes": "Skip reason says 'No missing fields' but real reason is _has_grounded_evidence() == False. Fix message. Consider allowing Claude to infer website from company+address when no other source succeeded."
+      "notes": "Fixed 2026-04-21: failsafe now runs on identity-only leads (company + city/address) even without grounded API evidence. Owner contact fields still blocked by CLAUDE_FAILSAFE_FIELDS allowlist. Skip reasons emitted dynamically via meta['__skip_reason'] with three specific cases. Tests updated in test_claude_failsafe_scope.py."
     },
     {
       "id": 3,

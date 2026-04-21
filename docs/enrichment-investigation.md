@@ -34,7 +34,7 @@ Out of 19 leads, only 4 get any enrichment. The other 15 exit the waterfall comp
 
 ## Bug 2: Claude failsafe skips leads that have many empty fields
 
-**Status:** Investigating
+**Status:** Fixed (2026-04-21)
 
 **Observed:** For the 15 unenriched leads, Claude failsafe reports "No missing non-contact fields remained to infer" — but these leads have empty `services_offered`, `company_description`, `review_summary`, `certifications`, etc.
 
@@ -46,9 +46,12 @@ Out of 19 leads, only 4 get any enrichment. The other 15 exit the waterfall comp
 
 **The skip reason message is misleading.** The actual skip is `_has_grounded_evidence() == False`, but the emitted message says "No missing non-contact fields remained to infer" (which is the generic `STEP_SKIP_REASONS` string, not the actual reason).
 
-**Next steps:**
-1. Fix the skip reason to distinguish "no grounded evidence" from "no missing fields".
-2. Consider whether Claude failsafe should have a weaker mode for leads with zero enrichment — e.g., if a lead has company + address + industry, Claude could at least try to infer a website URL.
+**Fix applied (2026-04-21):**
+- Relaxed the guard in `_step_claude_failsafe()`: the failsafe now runs if the lead has EITHER grounded API evidence OR minimal identity (company name + city or address). This lets Claude still infer non-contact fields like `services_offered`, `company_description`, `industry` when Google Places fails to match.
+- Kept the hard guardrail: the failsafe still cannot write owner contact fields (enforced by `CLAUDE_FAILSAFE_FIELDS` allowlist), so Claude cannot hallucinate names/emails/phones even on identity-only leads.
+- Loosened the LOW_VALUE_CLAUDE_FIELDS gate: it only applies when we already have grounded evidence. Identity-only leads may attempt even low-value fields because the marginal cost is small and the lead has no other data.
+- Replaced the single static skip message with three specific dynamic reasons: "no evidence and no identity", "all fields already populated", and "only low-value fields remained". Reasons are written to `meta['__skip_reason']` and picked up by `_run_step` when emitting the skip event.
+- Updated `tests/test_claude_failsafe_scope.py` to match the new behavior (identity-only leads now DO call Claude).
 
 ---
 
@@ -85,3 +88,4 @@ Out of 19 leads, only 4 get any enrichment. The other 15 exit the waterfall comp
 |------|--------|
 | 2026-04-20 | Initial investigation doc created. 4 bugs identified from runs 53/54. |
 | 2026-04-20 | Bug 1 fix: added unfiltered search for enrichment, reduced stopwords. |
+| 2026-04-21 | Bug 2 fix: failsafe guard now accepts identity-only leads; dynamic skip reasons emitted. |

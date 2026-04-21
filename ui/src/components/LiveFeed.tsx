@@ -53,15 +53,19 @@ function formatEvent(e: PipelineEvent): { text: string; color: string } | null {
         text: `Run complete — Inserted: ${e.inserted} | Geo: ${e.skipped_geo?.toLocaleString()} | Dupes: ${e.skipped_dupe}`,
         color: 'text-green-300',
       }
-    case 'outreach_start':
-      return { text: `Pushing ${e.count} leads to Instantly...`, color: 'text-blue-400' }
-    case 'outreach_done':
+    case 'export_start':
+      return { text: `Exporting ${e.count} leads to Notion...`, color: 'text-blue-400' }
+    case 'export_lead':
+      return { text: `  Exported ${e.company} (${e.index}/${e.total})`, color: 'text-cyan-400' }
+    case 'export_skip':
+      return { text: `  Skipped ${e.company ?? 'lead'}${e.reason ? ` · ${e.reason}` : ''}`, color: 'text-yellow-400' }
+    case 'export_done':
       return {
-        text: `Outreach complete — ${e.pushed} pushed, ${e.skipped} skipped (no email), ${e.failed} failed`,
+        text: `Notion export complete — ${e.exported ?? 0} exported, ${e.skipped ?? 0} skipped, ${e.errors ?? 0} errors`,
         color: 'text-green-300',
       }
-    case 'outreach_error':
-      return { text: `Outreach error: ${e.message}`, color: 'text-red-400' }
+    case 'export_error':
+      return { text: `Notion export error: ${e.error ?? e.message}`, color: 'text-red-400' }
     case 'search_capped':
       return { text: `Search cap reached — ${e.count} leads inserted`, color: 'text-yellow-400' }
     case 'enrich_start':
@@ -86,14 +90,6 @@ function formatEvent(e: PipelineEvent): { text: string; color: string } | null {
       return { text: e.message || `Enrichment complete — ${e.count} leads enriched`, color: 'text-green-300' }
     case 'enrich_error':
       return { text: `Enrichment error: ${e.message}`, color: 'text-red-400' }
-    case 'generate_start':
-      return { text: `Generating emails for ${e.count} leads...`, color: 'text-blue-400' }
-    case 'generate_lead':
-      return { text: `  Email generated for ${e.company} (${e.index}/${e.total})`, color: 'text-purple-400' }
-    case 'generate_done':
-      return { text: `Email generation complete — ${e.count} emails`, color: 'text-green-300' }
-    case 'generate_error':
-      return { text: `Email generation error: ${e.message}`, color: 'text-red-400' }
     case 'paused':
       return { text: 'Run paused', color: 'text-yellow-400' }
     case 'resumed':

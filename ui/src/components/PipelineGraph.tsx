@@ -43,14 +43,26 @@ function PipelineNode({ data }: { data: PipelineNodeData }) {
 const nodeTypes: NodeTypes = { pipeline: PipelineNode as NodeTypes[string] }
 
 interface NodeStates {
-  config: NodeState; search: NodeState; enrich: NodeState; generate: NodeState; outreach: NodeState; done: NodeState
-  searchSubText: string; enrichSubText: string; generateSubText: string; outreachSubText: string
+  config: NodeState
+  search: NodeState
+  enrich: NodeState
+  export: NodeState
+  done: NodeState
+  searchSubText: string
+  enrichSubText: string
+  exportSubText: string
 }
 
 function getNodeStates(events: PipelineEvent[]): NodeStates {
   const idle: NodeStates = {
-    config: 'idle', search: 'idle', enrich: 'idle', generate: 'idle', outreach: 'idle', done: 'idle',
-    searchSubText: '', enrichSubText: '', generateSubText: '', outreachSubText: '',
+    config: 'idle',
+    search: 'idle',
+    enrich: 'idle',
+    export: 'idle',
+    done: 'idle',
+    searchSubText: '',
+    enrichSubText: '',
+    exportSubText: '',
   }
   const last = events[events.length - 1]
   if (!last) return idle
@@ -58,55 +70,152 @@ function getNodeStates(events: PipelineEvent[]): NodeStates {
   const type = last.type
 
   if (type === 'done')
-    return { config: 'complete', search: 'complete', enrich: 'complete', generate: 'complete', outreach: 'complete', done: 'active',
-      searchSubText: '', enrichSubText: '', generateSubText: '', outreachSubText: '' }
-  if (type === 'outreach_done')
-    return { config: 'complete', search: 'complete', enrich: 'complete', generate: 'complete', outreach: 'complete', done: 'idle',
-      searchSubText: '', enrichSubText: '', generateSubText: '', outreachSubText: `${last.pushed} pushed` }
-  if (type === 'outreach_error')
-    return { config: 'complete', search: 'complete', enrich: 'complete', generate: 'complete', outreach: 'error', done: 'idle',
-      searchSubText: '', enrichSubText: '', generateSubText: '', outreachSubText: 'Push failed' }
-  if (type === 'outreach_start')
-    return { config: 'complete', search: 'complete', enrich: 'complete', generate: 'complete', outreach: 'active', done: 'idle',
-      searchSubText: '', enrichSubText: '', generateSubText: '', outreachSubText: `Pushing ${last.count} leads...` }
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'complete',
+      export: 'complete',
+      done: 'active',
+      searchSubText: '',
+      enrichSubText: '',
+      exportSubText: '',
+    }
 
-  // Generate stage
-  if (type === 'generate_done')
-    return { config: 'complete', search: 'complete', enrich: 'complete', generate: 'complete', outreach: 'idle', done: 'idle',
-      searchSubText: '', enrichSubText: '', generateSubText: `${last.count} emails`, outreachSubText: '' }
-  if (type === 'generate_error')
-    return { config: 'complete', search: 'complete', enrich: 'complete', generate: 'active', outreach: 'idle', done: 'idle',
-      searchSubText: '', enrichSubText: '', generateSubText: 'Error', outreachSubText: '' }
-  if (type === 'generate_lead')
-    return { config: 'complete', search: 'complete', enrich: 'complete', generate: 'active', outreach: 'idle', done: 'idle',
-      searchSubText: '', enrichSubText: '', generateSubText: `${last.index}/${last.total} emails`, outreachSubText: '' }
-  if (type === 'generate_start')
-    return { config: 'complete', search: 'complete', enrich: 'complete', generate: 'active', outreach: 'idle', done: 'idle',
-      searchSubText: '', enrichSubText: '', generateSubText: `Generating ${last.count}...`, outreachSubText: '' }
+  if (type === 'export_done')
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'complete',
+      export: 'complete',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: '',
+      exportSubText: `${last.exported ?? 0} exported`,
+    }
+  if (type === 'export_error')
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'complete',
+      export: 'error',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: '',
+      exportSubText: 'Export failed',
+    }
+  if (type === 'export_lead')
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'complete',
+      export: 'active',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: '',
+      exportSubText: `${last.index}/${last.total} leads`,
+    }
+  if (type === 'export_skip')
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'complete',
+      export: 'complete',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: '',
+      exportSubText: last.reason ? `Skipped · ${last.reason}` : 'Skipped',
+    }
+  if (type === 'export_start')
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'complete',
+      export: 'active',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: '',
+      exportSubText: `Exporting ${last.count ?? 0}...`,
+    }
 
   // Enrich stage
   if (type === 'enrich_done')
-    return { config: 'complete', search: 'complete', enrich: 'complete', generate: 'idle', outreach: 'idle', done: 'idle',
-      searchSubText: '', enrichSubText: `${last.count} enriched`, generateSubText: '', outreachSubText: '' }
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'complete',
+      export: 'idle',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: `${last.count} enriched`,
+      exportSubText: '',
+    }
   if (type === 'enrich_error')
-    return { config: 'complete', search: 'complete', enrich: 'active', generate: 'idle', outreach: 'idle', done: 'idle',
-      searchSubText: '', enrichSubText: 'Error', generateSubText: '', outreachSubText: '' }
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'active',
+      export: 'idle',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: 'Error',
+      exportSubText: '',
+    }
   if (type === 'enrich_lead')
-    return { config: 'complete', search: 'complete', enrich: 'active', generate: 'idle', outreach: 'idle', done: 'idle',
-      searchSubText: '', enrichSubText: `${last.index}/${last.total} leads`, generateSubText: '', outreachSubText: '' }
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'active',
+      export: 'idle',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: `${last.index}/${last.total} leads`,
+      exportSubText: '',
+    }
   if (type === 'enrich_start')
-    return { config: 'complete', search: 'complete', enrich: 'active', generate: 'idle', outreach: 'idle', done: 'idle',
-      searchSubText: '', enrichSubText: `Enriching ${last.count}...`, generateSubText: '', outreachSubText: '' }
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'active',
+      export: 'idle',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: `Enriching ${last.count}...`,
+      exportSubText: '',
+    }
 
   if (type === 'error')
-    return { config: 'complete', search: 'error', enrich: 'idle', generate: 'idle', outreach: 'idle', done: 'idle',
-      searchSubText: '', enrichSubText: '', generateSubText: '', outreachSubText: '' }
+    return {
+      config: 'complete',
+      search: 'error',
+      enrich: 'idle',
+      export: 'idle',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: '',
+      exportSubText: '',
+    }
   if (type === 'start')
-    return { config: 'active', search: 'idle', enrich: 'idle', generate: 'idle', outreach: 'idle', done: 'idle',
-      searchSubText: '', enrichSubText: '', generateSubText: '', outreachSubText: '' }
+    return {
+      config: 'active',
+      search: 'idle',
+      enrich: 'idle',
+      export: 'idle',
+      done: 'idle',
+      searchSubText: '',
+      enrichSubText: '',
+      exportSubText: '',
+    }
   if (type === 'search_capped')
-    return { config: 'complete', search: 'complete', enrich: 'idle', generate: 'idle', outreach: 'idle', done: 'idle',
-      searchSubText: `Capped at ${last.count}`, enrichSubText: '', generateSubText: '', outreachSubText: '' }
+    return {
+      config: 'complete',
+      search: 'complete',
+      enrich: 'idle',
+      export: 'idle',
+      done: 'idle',
+      searchSubText: `Capped at ${last.count}`,
+      enrichSubText: '',
+      exportSubText: '',
+    }
 
   const subMap: Record<string, string> = {
     search:      `Searching (${last.index}/${last.total})`,
@@ -119,8 +228,16 @@ function getNodeStates(events: PipelineEvent[]): NodeStates {
     progress:    `Batch done (${last.index}/${last.total})`,
   }
 
-  return { config: 'complete', search: 'active', enrich: 'idle', generate: 'idle', outreach: 'idle', done: 'idle',
-    searchSubText: subMap[type] ?? '', enrichSubText: '', generateSubText: '', outreachSubText: '' }
+  return {
+    config: 'complete',
+    search: 'active',
+    enrich: 'idle',
+    export: 'idle',
+    done: 'idle',
+    searchSubText: subMap[type] ?? '',
+    enrichSubText: '',
+    exportSubText: '',
+  }
 }
 
 type PNode = Node<PipelineNodeData>
@@ -132,32 +249,29 @@ export function PipelineGraph({ events, onConfigClick }: {
   const s = getNodeStates(events)
 
   const initNodes: PNode[] = [
-    { id: 'config',   type: 'pipeline', position: { x: 0,   y: 0 }, data: { label: 'Config',   state: 'idle', subText: 'Click to configure', isFirst: true } },
-    { id: 'search',   type: 'pipeline', position: { x: 200, y: 0 }, data: { label: 'Search',   state: 'idle', subText: '' } },
-    { id: 'enrich',   type: 'pipeline', position: { x: 400, y: 0 }, data: { label: 'Enrich',   state: 'idle', subText: '' } },
-    { id: 'generate', type: 'pipeline', position: { x: 600, y: 0 }, data: { label: 'Generate', state: 'idle', subText: '' } },
-    { id: 'outreach', type: 'pipeline', position: { x: 800, y: 0 }, data: { label: 'Outreach', state: 'idle', subText: '' } },
-    { id: 'done',     type: 'pipeline', position: { x: 1000, y: 0 }, data: { label: 'Done',    state: 'idle', isLast: true } },
+    { id: 'config', type: 'pipeline', position: { x: 0, y: 0 }, data: { label: 'Config', state: 'idle', subText: 'Click to configure', isFirst: true } },
+    { id: 'search', type: 'pipeline', position: { x: 200, y: 0 }, data: { label: 'Search', state: 'idle', subText: '' } },
+    { id: 'enrich', type: 'pipeline', position: { x: 400, y: 0 }, data: { label: 'Enrich', state: 'idle', subText: '' } },
+    { id: 'export', type: 'pipeline', position: { x: 600, y: 0 }, data: { label: 'Export', state: 'idle', subText: '' } },
+    { id: 'done', type: 'pipeline', position: { x: 800, y: 0 }, data: { label: 'Done', state: 'idle', isLast: true } },
   ]
 
   const initEdges = [
-    { id: 'e1', source: 'config',   target: 'search',   style: { stroke: '#4b5563' } },
-    { id: 'e2', source: 'search',   target: 'enrich',   style: { stroke: '#4b5563' } },
-    { id: 'e3', source: 'enrich',   target: 'generate', style: { stroke: '#4b5563' } },
-    { id: 'e4', source: 'generate', target: 'outreach', style: { stroke: '#4b5563' } },
-    { id: 'e5', source: 'outreach', target: 'done',     style: { stroke: '#4b5563' } },
+    { id: 'e1', source: 'config', target: 'search', style: { stroke: '#4b5563' } },
+    { id: 'e2', source: 'search', target: 'enrich', style: { stroke: '#4b5563' } },
+    { id: 'e3', source: 'enrich', target: 'export', style: { stroke: '#4b5563' } },
+    { id: 'e4', source: 'export', target: 'done', style: { stroke: '#4b5563' } },
   ]
 
   const [nodes, , onNodesChange] = useNodesState<PNode>(initNodes)
   const [edges, , onEdgesChange] = useEdgesState(initEdges)
 
   const updatedNodes: PNode[] = nodes.map(n => {
-    if (n.id === 'config')   return { ...n, data: { ...n.data, state: s.config } }
-    if (n.id === 'search')   return { ...n, data: { ...n.data, state: s.search,   subText: s.searchSubText } }
-    if (n.id === 'enrich')   return { ...n, data: { ...n.data, state: s.enrich,   subText: s.enrichSubText } }
-    if (n.id === 'generate') return { ...n, data: { ...n.data, state: s.generate, subText: s.generateSubText } }
-    if (n.id === 'outreach') return { ...n, data: { ...n.data, state: s.outreach, subText: s.outreachSubText } }
-    if (n.id === 'done')     return { ...n, data: { ...n.data, state: s.done } }
+    if (n.id === 'config') return { ...n, data: { ...n.data, state: s.config } }
+    if (n.id === 'search') return { ...n, data: { ...n.data, state: s.search, subText: s.searchSubText } }
+    if (n.id === 'enrich') return { ...n, data: { ...n.data, state: s.enrich, subText: s.enrichSubText } }
+    if (n.id === 'export') return { ...n, data: { ...n.data, state: s.export, subText: s.exportSubText } }
+    if (n.id === 'done') return { ...n, data: { ...n.data, state: s.done } }
     return n
   })
 

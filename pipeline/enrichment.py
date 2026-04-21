@@ -74,7 +74,7 @@ STEP_SKIP_REASONS = {
     'apollo': 'No usable owner/company context remained for people matching.',
     'fullenrich': 'No FULLENRICH_API_KEY set, or all owner fields already filled.',
     'scrape_website': 'No website available to scrape, or no scraper fallback is configured.',
-    'scrape_reviews': 'No review URL available to scrape, or no scraper fallback is configured.',
+    'scrape_reviews': 'Review scrape disabled, or no review URL available to scrape.',
     'company_fallback': 'No company email or phone available to reuse.',
     'claude_failsafe': 'No missing non-contact fields remained to infer.',
 }
@@ -258,6 +258,40 @@ def _source_priority(field: str, source: str | None) -> int:
     return OWNER_FIELD_SOURCE_PRIORITY.get(field, {}).get(source, 0)
 
 
+def _is_real_google_place_id(value: str | None) -> bool:
+    return bool(value) and not str(value).startswith('CSV_')
+
+
+def _looks_like_person_linkedin(value: str | None) -> bool:
+    text = str(value or '').strip().lower()
+    return text.startswith('http') and 'linkedin.com/in/' in text
+
+
+def _grounded_field_present(lead: dict, enriched: dict, meta: dict, field: str) -> bool:
+    value = _value(lead, enriched, field)
+    if _is_empty(value):
+        return False
+    source = _field_source(meta, field)
+    if source in {'claude_inferred', 'csv_import', None}:
+        return field in {'website', 'company_phone', 'company_email'} and bool(lead.get(field))
+    return True
+
+
+def _has_grounded_evidence(lead: dict, enriched: dict, meta: dict) -> bool:
+    if _is_real_google_place_id(_value(lead, enriched, 'google_place_id')):
+        return True
+    grounded_fields = (
+        'website',
+        'company_phone',
+        'company_email',
+        'owner_name',
+        'owner_email',
+        'services_offered',
+        'company_description',
+    )
+    return any(_grounded_field_present(lead, enriched, meta, field) for field in grounded_fields)
+
+
 def _generic_email(email: str | None) -> bool:
     if not email or '@' not in email:
         return True
@@ -313,6 +347,29 @@ def _should_replace(field: str, current_value, current_meta: dict, new_value, ne
         new_len = len(new_value) if isinstance(new_value, list) else 0
         return new_len > current_len
     return False
+
+
+def _company_tokens(company: str | None) -> set[str]:
+    text = str(company or '').lower()
+    text = ''.join(ch if ch.isalnum() else ' ' for ch in text)
+    stopwords = {'inc', 'llc', 'co', 'company', 'corporation', 'corp', 'the'}
+    return {token for token in text.split() if len(token) > 2 and token not in stopwords}
+
+
+def _relevant_pages_for_company(company: str | None, pages: list[dict]) -> list[dict]:
+    tokens = _company_tokens(company)
+    if not tokens:
+        return pages
+    relevant = []
+    for page in pages:
+        haystack = ' '.join([
+            str(page.get('url') or ''),
+            str(page.get('markdown') or '')[:4000],
+        ]).lower()
+        matches = sum(1 for token in tokens if token in haystack)
+        if matches >= min(2, len(tokens)):
+            relevant.append(page)
+    return relevant or pages
 
 
 def _merge(enriched: dict, meta: dict, result: dict, source: str):
@@ -491,7 +548,7 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
 
             def candidate_linkedin(c: dict) -> str | None:
                 for key in ('linkedin', 'linkedin_url'):
-                    if c.get(key):
+                    if c.get(key) and _looks_like_person_linkedin(c.get(key)):
                         return str(c[key]).strip()
                 return None
 
@@ -575,7 +632,7 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
                     if full_name:
                         result['owner_name'] = full_name
                     for key in ('linkedin', 'linkedin_url'):
-                        if finder_data.get(key):
+                        if finder_data.get(key) and _looks_like_person_linkedin(finder_data.get(key)):
                             result['owner_linkedin'] = str(finder_data[key]).strip()
                             break
                     for key in ('phone_number', 'phone'):
@@ -625,9 +682,6 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
     try:
         payload = {
             'reveal_personal_emails': True,
-            'reveal_phone_number': True,
-            'run_waterfall_email': True,
-            'run_waterfall_phone': True,
         }
         if _value(lead, enriched, 'company'):
             payload['organization_name'] = _value(lead, enriched, 'company')
@@ -635,11 +689,14 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
             payload['domain'] = domain
         if owner_email:
             payload['email'] = owner_email
+        owner_linkedin = _value(lead, enriched, 'owner_linkedin')
+        if _looks_like_person_linkedin(owner_linkedin):
+            payload['linkedin_url'] = str(owner_linkedin).strip()
         if owner_name:
             payload['name'] = owner_name
             parts = owner_name.split(' ')
-            payload['first_name'] = parts[0]
             if len(parts) > 1:
+                payload['first_name'] = parts[0]
                 payload['last_name'] = ' '.join(parts[1:])
         session = _x402_session()
         resp = session.post(
@@ -666,7 +723,7 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
             phones = person['phone_numbers']
             if phones:
                 result['owner_phone'] = phones[0].get('sanitized_number') or phones[0].get('raw_number')
-        if person.get('linkedin_url'):
+        if _looks_like_person_linkedin(person.get('linkedin_url')):
             result['owner_linkedin'] = person['linkedin_url']
         # Organization fields
         if org.get('founded_year'):
@@ -850,6 +907,7 @@ def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
         pages = scrape_site_pages(website)
         if not pages:
             return 0.0
+        pages = _relevant_pages_for_company(_value(lead, enriched, 'company'), pages)
         evidence = '\n\n'.join(
             f'URL: {page["url"]}\n{page["markdown"][:6000]}'
             for page in pages
@@ -857,6 +915,7 @@ def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
         prompt = (
             'Extract company information from the website content below. '
             'Only return values that are explicitly supported by the text. '
+            'Ignore content that is unrelated to the company named in the source pages. '
             'Do not guess or infer email addresses or phone numbers. '
             'For owner_name, look in About Us, Team, Leadership, or bio sections — '
             'identify the Owner, Founder, Co-Founder, President, or CEO by name '
@@ -974,12 +1033,22 @@ CLAUDE_FAILSAFE_FIELDS = {
 
 
 def _step_claude_failsafe(lead: dict, enriched: dict, meta: dict) -> float:
+    has_evidence = _has_grounded_evidence(lead, enriched, meta)
+    # Minimal identity: company name + at least city or address
+    has_identity = bool(
+        _value(lead, enriched, 'company')
+        and (_value(lead, enriched, 'city') or _value(lead, enriched, 'address'))
+    )
+
+    if not has_evidence and not has_identity:
+        return 0.0
+
     missing = _get_missing(lead, enriched)
     # Only consider fields the failsafe is allowed to fill.
     missing = [f for f in missing if f in CLAUDE_FAILSAFE_FIELDS]
     if not missing:
         return 0.0
-    if set(missing).issubset(LOW_VALUE_CLAUDE_FIELDS):
+    if has_evidence and set(missing).issubset(LOW_VALUE_CLAUDE_FIELDS):
         return 0.0
     known = {}
     for k in ['company', 'owner_name', 'company_email', 'company_phone', 'address', 'city',
@@ -1047,12 +1116,13 @@ _STEP_FN_NAMES = {
     'claude_failsafe':   '_step_claude_failsafe',
 }
 
-PHASE_1 = ['google_places', 'google_maps']
-PHASE_2 = ['hunter', 'scrape_website']
-PHASE_3 = ['apollo', 'scrape_reviews', 'company_fallback', 'claude_failsafe']
+STAGE_1 = ['google_places', 'google_maps']
+STAGE_2 = ['scrape_website']
+STAGE_3 = ['apollo', 'hunter', 'fullenrich']
+STAGE_4 = ['scrape_reviews', 'company_fallback', 'claude_failsafe']
 
-# Backward compat
-STEPS = [(k, globals()[_STEP_FN_NAMES[k]]) for k in PHASE_1 + PHASE_2 + PHASE_3]
+# Backward compat alias so existing imports still work.
+STEPS = [(k, globals()[_STEP_FN_NAMES[k]]) for k in STAGE_1 + STAGE_2 + STAGE_3 + STAGE_4]
 
 
 def _get_step_fn(step_key: str):
@@ -1134,12 +1204,29 @@ def _run_step(step_key, lead, enriched, meta, emit, company):
         return 0.0
 
 
+def _merge_stage3_result(enriched, meta, step_enriched, step_meta):
+    """Merge a Stage 3 subresult into the main dicts using source priority."""
+    for field, value in step_enriched.items():
+        if _is_empty(value):
+            continue
+        source_info = step_meta.get(field) or {}
+        source = source_info.get('source') or source_info.get('provider')
+        if _should_replace(field, enriched.get(field), meta, value, source):
+            enriched[field] = value
+            meta[field] = dict(source_info)
+            continue
+        if field not in enriched or _is_empty(enriched[field]):
+            enriched[field] = value
+            meta[field] = dict(source_info)
+
+
 def enrich_lead(lead_id: int, emit=None, wait_if_paused=None) -> dict:
     """
-    Run the enrichment waterfall in 3 phases:
-      Phase 1 (sequential): Claude discovery -> Google Places -> Google Maps URL
-      Phase 2 (parallel):   Hunter | Website scrape
-      Phase 3 (sequential): Apollo -> Review scrape -> Company fallback -> Claude failsafe
+    Run the enrichment waterfall in 4 stages:
+      Stage 1 (sequential): Google Places -> Google Maps URL
+      Stage 2 (sequential): Website scrape
+      Stage 3 (parallel):   Apollo | Hunter | FullEnrich
+      Stage 4 (sequential): Review scrape -> Company fallback -> Claude failsafe
     Returns {'cost': float, 'sources': dict}.
     """
     if emit is None:
@@ -1158,64 +1245,57 @@ def enrich_lead(lead_id: int, emit=None, wait_if_paused=None) -> dict:
     meta: dict = {}
     total_cost = 0.0
 
-    # Phase 1: sequential foundation
-    for step_key in PHASE_1:
+    # Stage 1: business identity (sequential)
+    for step_key in STAGE_1:
         _pause_check()
         total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
 
-    # Phase 2: parallel data fetch
+    # Stage 2: company evidence (sequential so owner_name can feed Stage 3)
+    for step_key in STAGE_2:
+        _pause_check()
+        total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
+
+    # Stage 3: owner contact (parallel, merged by source priority)
     _pause_check()
     from pipeline.config import ENRICH_PHASE2_CONCURRENCY
 
-    phase2_results = {}
+    stage3_results = {}
+    merged_lead = {**lead, **enriched}
 
-    def run_phase2_step(step_key):
+    def run_stage3_step(step_key):
         step_enriched = {}
         step_meta = {}
-        # Snapshot lead + phase1 enriched so phase2 steps see phase1 results
-        merged_lead = {**lead, **enriched}
         cost = _run_step(step_key, merged_lead, step_enriched, step_meta, emit, company)
         return step_key, cost, step_enriched, step_meta
 
     with ThreadPoolExecutor(max_workers=ENRICH_PHASE2_CONCURRENCY) as executor:
         futures = {
-            executor.submit(run_phase2_step, step_key): step_key
-            for step_key in PHASE_2
+            executor.submit(run_stage3_step, step_key): step_key
+            for step_key in STAGE_3
         }
         for future in as_completed(futures):
             try:
                 step_key, cost, step_enriched, step_meta = future.result()
-                phase2_results[step_key] = (cost, step_enriched, step_meta)
+                stage3_results[step_key] = (cost, step_enriched, step_meta)
             except Exception as exc:
                 _error_logger.error(
-                    'lead_id=%s company=%s phase2_future step=%s error=%s\n%s',
+                    'lead_id=%s company=%s stage3_future step=%s error=%s\n%s',
                     lead_id, company, futures[future], exc, traceback.format_exc(),
                 )
 
-    # Merge phase 2 results in deterministic order (hunter -> scrape)
-    for step_key in PHASE_2:
-        if step_key in phase2_results:
-            cost, step_enriched, step_meta = phase2_results[step_key]
+    # Merge in strict priority order: Apollo first, then Hunter, then FullEnrich.
+    for step_key in STAGE_3:
+        if step_key in stage3_results:
+            cost, step_enriched, step_meta = stage3_results[step_key]
             total_cost += cost
-            for field, value in step_enriched.items():
-                if _is_empty(value):
-                    continue
-                source_info = step_meta.get(field) or {}
-                source = source_info.get('source') or source_info.get('provider')
-                if _should_replace(field, enriched.get(field), meta, value, source):
-                    enriched[field] = value
-                    meta[field] = dict(source_info)
-                    continue
-                if field not in enriched or _is_empty(enriched[field]):
-                    enriched[field] = value
-                    meta[field] = dict(source_info)
+            _merge_stage3_result(enriched, meta, step_enriched, step_meta)
 
-    # Phase 3: sequential finalization
-    for step_key in PHASE_3:
+    # Stage 4: finalization (sequential)
+    for step_key in STAGE_4:
         _pause_check()
         total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
 
-    # Write to DB
+    # Persist
     if enriched:
         enriched['enrichment_meta'] = json.dumps(meta)
         update_lead(lead_id, enriched)

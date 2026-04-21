@@ -1,0 +1,33 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-10-notion-export.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Remove generate/outreach dead code",
+      "status": "pending",
+      "description": "**Goal:** Delete unused email generation and outreach files, clean up imports.\n\n**Files:**\n- Delete: `pipeline/email_generator.py`\n- Delete: `pipeline/instantly.py`\n- Modify: `pipeline/run.py`, `pipeline/config.py`\n\n```json:metadata\n{\"files\": [\"pipeline/email_generator.py\", \"pipeline/instantly.py\", \"pipeline/run.py\", \"pipeline/config.py\"], \"verifyCommand\": \"venv/bin/python -c 'from pipeline.run import run_pipeline; print(\\\"OK\\\")'\", \"acceptanceCriteria\": [\"email_generator.py deleted\", \"instantly.py deleted\", \"GENERATE_CONCURRENCY removed\", \"no stale references\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: Create Notion database and pipeline/notion.py",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** Create Notion database via MCP, build Python export module.\n\n**Files:**\n- Create: `pipeline/notion.py`\n- Modify: `pipeline/config.py`\n- Create: `tests/test_notion.py`\n\n```json:metadata\n{\"files\": [\"pipeline/notion.py\", \"pipeline/config.py\", \"tests/test_notion.py\"], \"verifyCommand\": \"venv/bin/python -m pytest tests/test_notion.py -v\", \"acceptanceCriteria\": [\"Notion database created\", \"config settings added\", \"export function works\", \"7 tests pass\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Integrate Notion export into pipeline flow",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Add export stage after enrichment in run_pipeline() and run_csv_pipeline().\n\n**Files:**\n- Modify: `pipeline/run.py`\n\n```json:metadata\n{\"files\": [\"pipeline/run.py\"], \"verifyCommand\": \"venv/bin/python -c 'from pipeline.run import run_pipeline; print(\\\"OK\\\")'\", \"acceptanceCriteria\": [\"export called in run_pipeline\", \"export called in run_csv_pipeline\", \"error handling\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Update UI pipeline graph",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** Replace Generate+Outreach nodes with Export node.\n\n**Files:**\n- Modify: `ui/src/components/PipelineGraph.tsx`\n\n```json:metadata\n{\"files\": [\"ui/src/components/PipelineGraph.tsx\"], \"verifyCommand\": \"cd ui && npx tsc --noEmit\", \"acceptanceCriteria\": [\"5 node layout\", \"export event handling\", \"no TS errors\"], \"requiresUserVerification\": false}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-10T00:00:00Z"
+}

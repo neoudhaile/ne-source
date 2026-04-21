@@ -1,0 +1,51 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-10-enrichment-bugfixes.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Add x402 wallet balance check function",
+      "status": "completed",
+      "description": "**Goal:** Create a function that queries the USDC balance on Base for the x402 wallet, so the pipeline can detect insufficient funds before wasting API calls.\n\n**Files:**\n- Modify: `pipeline/enrichment.py` (add `check_x402_balance()` after line 91)\n- Create: `tests/test_enrichment_balance.py`\n\n**Acceptance Criteria:**\n- [ ] `check_x402_balance()` returns a float representing USDC balance in dollars\n- [ ] Uses public Base RPC with `eth_call` to USDC contract\n- [ ] Returns 0.0 on any RPC error\n- [ ] Tests pass with mocked RPC responses\n\n**Verify:** `venv/bin/python -m pytest tests/test_enrichment_balance.py -v`\n\n```json:metadata\n{\"files\": [\"pipeline/enrichment.py\", \"tests/test_enrichment_balance.py\"], \"verifyCommand\": \"venv/bin/python -m pytest tests/test_enrichment_balance.py -v\", \"acceptanceCriteria\": [\"check_x402_balance() returns float USDC balance\", \"Uses Base RPC eth_call\", \"Returns 0.0 on error\", \"Tests pass\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: Add 402 short-circuit flag and detection in Hunter/Apollo",
+      "status": "completed",
+      "blockedBy": [0],
+      "description": "**Goal:** When the first Hunter or Apollo call returns 402, set a module-level flag so all subsequent x402 calls are skipped immediately.\n\n**Files:**\n- Modify: `pipeline/enrichment.py:264-353`\n- Modify: `tests/test_enrichment_balance.py`\n\n**Acceptance Criteria:**\n- [ ] Module-level `_x402_insufficient` flag with `reset_x402_flag()`\n- [ ] `_step_hunter` checks flag before API call; skips if set\n- [ ] `_step_apollo` checks flag before API call; skips if set\n- [ ] On 402 response, flag is set to True before raising\n- [ ] Tests verify flag behavior\n\n**Verify:** `venv/bin/python -m pytest tests/test_enrichment_balance.py -v`\n\n```json:metadata\n{\"files\": [\"pipeline/enrichment.py\", \"tests/test_enrichment_balance.py\"], \"verifyCommand\": \"venv/bin/python -m pytest tests/test_enrichment_balance.py -v\", \"acceptanceCriteria\": [\"_x402_insufficient flag exists\", \"Hunter checks flag\", \"Apollo checks flag\", \"402 sets flag\", \"Tests pass\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Add pre-flight balance check and insufficient_funds event to pipeline",
+      "status": "completed",
+      "blockedBy": [0, 1],
+      "description": "**Goal:** Before enrichment starts, check wallet balance against estimated cost. If insufficient, emit an `insufficient_funds` event and skip enrichment entirely.\n\n**Files:**\n- Modify: `pipeline/run.py:214-240`\n- Modify: `pipeline/run.py:322-344`\n- Modify: `pipeline/enrichment.py:660-670`\n- Modify: `tests/test_enrichment_balance.py`\n\n**Acceptance Criteria:**\n- [ ] Pre-flight balance check before `enrich_start`\n- [ ] Emits `insufficient_funds` event with balance and estimated_cost\n- [ ] Enrichment skipped entirely on low balance\n- [ ] Mid-run 402 detection in `_run_step`\n- [ ] `reset_x402_flag()` called at top of both pipeline functions\n- [ ] Tests verify enrichment is skipped\n\n**Verify:** `venv/bin/python -m pytest tests/test_enrichment_balance.py -v`\n\n```json:metadata\n{\"files\": [\"pipeline/run.py\", \"pipeline/enrichment.py\", \"tests/test_enrichment_balance.py\"], \"verifyCommand\": \"venv/bin/python -m pytest tests/test_enrichment_balance.py -v\", \"acceptanceCriteria\": [\"Pre-flight balance check works\", \"insufficient_funds event emitted\", \"Enrichment skipped entirely on low balance\", \"Mid-run 402 detection\", \"reset_x402_flag called\", \"Tests pass\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Add insufficient funds modal to UI",
+      "status": "completed",
+      "blockedBy": [2],
+      "description": "**Goal:** When the frontend receives an `insufficient_funds` WebSocket event, show a modal with balance info and auto-pause the run.\n\n**Files:**\n- Modify: `ui/src/types.ts`\n- Modify: `ui/src/components/LiveFeed.tsx`\n- Modify: `ui/src/App.tsx`\n\n**Acceptance Criteria:**\n- [ ] `PipelineEvent` type includes `balance?` and `estimated_cost?`\n- [ ] LiveFeed renders `insufficient_funds` as red warning\n- [ ] App.tsx detects event and shows centered modal overlay\n- [ ] Modal displays balance, estimated cost, wallet address, dismiss button\n- [ ] No TypeScript errors\n- [ ] User-perspective tests: modal shows real balance/cost numbers, live feed shows red warning\n\n**Verify:** `cd ui && npx tsc --noEmit` and `venv/bin/python -m pytest tests/test_enrichment_balance.py -v -k \"modal or live_feed\"`\n\n```json:metadata\n{\"files\": [\"ui/src/types.ts\", \"ui/src/components/LiveFeed.tsx\", \"ui/src/App.tsx\", \"tests/test_enrichment_balance.py\"], \"verifyCommand\": \"cd ui && npx tsc --noEmit\", \"acceptanceCriteria\": [\"PipelineEvent type updated\", \"LiveFeed renders event\", \"Modal shows on event\", \"No TS errors\", \"User-perspective tests pass\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Add Claude rate-limit retry with exponential backoff",
+      "status": "completed",
+      "description": "**Goal:** When Claude returns a 429 rate-limit error, retry with exponential backoff instead of permanently losing data.\n\n**Files:**\n- Modify: `pipeline/enrichment.py`\n- Modify: `tests/test_enrichment_balance.py`\n\n**Acceptance Criteria:**\n- [ ] `_claude_call_with_retry(fn, max_retries=2)` wrapper handles 429s\n- [ ] Retries up to 2 times: 5s, then 15s backoff\n- [ ] Non-429 errors raise immediately\n- [ ] All three Claude steps use the wrapper\n- [ ] Tests verify retry and immediate-raise behavior\n\n**Verify:** `venv/bin/python -m pytest tests/test_enrichment_balance.py -v`\n\n```json:metadata\n{\"files\": [\"pipeline/enrichment.py\", \"tests/test_enrichment_balance.py\"], \"verifyCommand\": \"venv/bin/python -m pytest tests/test_enrichment_balance.py -v\", \"acceptanceCriteria\": [\"_claude_call_with_retry exists\", \"Exponential backoff 5s/15s\", \"Non-429 raises immediately\", \"All 3 Claude steps wrapped\", \"Tests pass\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Fix pause lag — add pause checkpoints inside enrichment steps",
+      "status": "completed",
+      "description": "**Goal:** When user hits pause, in-flight leads stop at the next step boundary instead of running all 9 steps. Pass `wait_if_paused` into `enrich_lead()` and call it before each step.\n\n**Files:**\n- Modify: `pipeline/enrichment.py:718-791`\n- Modify: `pipeline/run.py`\n- Modify: `tests/test_enrichment_balance.py`\n\n**Acceptance Criteria:**\n- [ ] `enrich_lead()` accepts optional `wait_if_paused`\n- [ ] Checkpoint before each Phase 1/3 step and before Phase 2\n- [ ] run.py passes `wait_if_paused` through to `enrich_lead`\n- [ ] Tests verify pause checks between steps\n\n**Verify:** `venv/bin/python -m pytest tests/test_enrichment_balance.py -v`\n\n```json:metadata\n{\"files\": [\"pipeline/enrichment.py\", \"pipeline/run.py\", \"tests/test_enrichment_balance.py\"], \"verifyCommand\": \"venv/bin/python -m pytest tests/test_enrichment_balance.py -v\", \"acceptanceCriteria\": [\"enrich_lead accepts wait_if_paused\", \"Checkpoint before each Phase 1/3 step\", \"Checkpoint before Phase 2\", \"run.py passes wait_if_paused through\", \"Tests pass\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Fix LeadsTable — persistent row state with DB-backed seed",
+      "status": "completed",
+      "description": "**Goal:** LeadsTable replays all events via `buildRows()` on every render. The 500-event cap drops old `insert` events, causing leads to vanish. Fix with incremental persistent state + DB seed endpoint.\n\n**Files:**\n- Modify: `ui/src/components/LeadsTable.tsx`\n- Modify: `ui/src/App.tsx`\n- Modify: `ui/src/api.ts`\n- Modify: `ui/src/types.ts`\n- Modify: `api/main.py`\n- Modify: `api/db_queries.py`\n- Create: `tests/test_leads_table.py`\n\n**Acceptance Criteria:**\n- [ ] Rows persist across event trimming\n- [ ] `applyEvent()` processes events incrementally\n- [ ] `dbLeadToRow()` converts DB leads to LeadRow\n- [ ] `GET /api/runs/{run_id}/leads` returns leads with enrichment data\n- [ ] LeadsTable seeds from DB on mount\n- [ ] Live WS events overlay real-time status\n- [ ] No TypeScript errors\n- [ ] User-perspective tests: leads survive 500-event cap, incremental processing, DB seed for past runs\n\n**Verify:** `cd ui && npx tsc --noEmit` and `venv/bin/python -m pytest tests/test_leads_table.py -v`\n\n```json:metadata\n{\"files\": [\"ui/src/components/LeadsTable.tsx\", \"ui/src/App.tsx\", \"ui/src/api.ts\", \"ui/src/types.ts\", \"api/main.py\", \"api/db_queries.py\", \"tests/test_leads_table.py\"], \"verifyCommand\": \"cd ui && npx tsc --noEmit\", \"acceptanceCriteria\": [\"Rows persist across event trimming\", \"Incremental applyEvent\", \"dbLeadToRow works\", \"API endpoint returns run leads\", \"DB seed on mount\", \"WS overlay works\", \"No TS errors\", \"User-perspective tests pass\"], \"requiresUserVerification\": false}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-10T12:00:00Z"
+}

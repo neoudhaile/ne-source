@@ -4,7 +4,6 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pipeline.config import (
     CITIES,
     ENRICH_CONCURRENCY,
-    GENERATE_CONCURRENCY,
     INDUSTRIES,
     MAX_LEADS_PER_RUN,
     MIN_RATING,
@@ -20,6 +19,7 @@ from pipeline.db import (
 from pipeline.scraper import search_businesses, API_PAGE_SIZE
 from pipeline.normalize import normalize_lead
 from pipeline.enrichment import enrich_lead, check_x402_balance, reset_x402_flag
+from pipeline.notion import export_leads_to_notion
 from pipeline.tiering import tier_leads
 
 
@@ -43,6 +43,15 @@ def _emit_non_tier1_skips(leads, emit):
             'message': 'Skipping non-Tier 1 lead before enrichment.',
         })
     return tier1_ids
+
+
+def _retier_after_enrichment(lead_ids, emit=None, wait_if_paused=None):
+    if not lead_ids:
+        return []
+    if emit is None:
+        emit = lambda e: None
+    tier_result = tier_leads(lead_ids, emit=emit, wait_if_paused=wait_if_paused)
+    return tier_result['kept_ids']
 
 
 def _run_stage_concurrently(
@@ -255,6 +264,16 @@ def run_pipeline(emit=None, run_id=None, wait_if_paused=None):
         )
         emit({'type': 'enrich_done', 'count': len(inserted_ids)})
 
+        inserted_ids = _retier_after_enrichment(inserted_ids, emit=emit, wait_if_paused=wait_if_paused)
+        inserted_leads = get_leads_by_ids(inserted_ids)
+        inserted_lead_map = {lead['id']: lead for lead in inserted_leads}
+
+        # ── Export stage ───────────────────────────────────────────────────
+        try:
+            export_leads_to_notion(inserted_ids, emit=emit)
+        except Exception as e:
+            emit({'type': 'export_error', 'error': str(e), 'message': str(e)})
+
         # Store cost on the run
         if run_id is not None:
             update_run_cost(run_id, total_cost)
@@ -373,6 +392,16 @@ def run_csv_pipeline(lead_ids: list[int], emit=None, run_id=None, wait_if_paused
             wait_if_paused=wait_if_paused,
         )
         emit({'type': 'enrich_done', 'count': len(lead_ids)})
+
+        lead_ids = _retier_after_enrichment(lead_ids, emit=emit, wait_if_paused=wait_if_paused)
+        inserted_leads = get_leads_by_ids(lead_ids)
+        lead_map = {lead['id']: lead for lead in inserted_leads}
+
+        # ── Export stage ───────────────────────────────────────────────────
+        try:
+            export_leads_to_notion(lead_ids, emit=emit)
+        except Exception as e:
+            emit({'type': 'export_error', 'error': str(e), 'message': str(e)})
 
         # Store cost on the run
         if run_id is not None:

@@ -6,9 +6,9 @@ interface Lead {
   id: number
   company: string
   owner_name: string | null
-  email: string | null
+  company_email: string | null
   owner_email: string | null
-  phone: string | null
+  company_phone: string | null
   city: string | null
   state: string | null
   industry: string | null
@@ -83,17 +83,22 @@ function LeadCard({ lead }: { lead: Lead }) {
           <div>
             <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Basic Info</div>
             <FieldRow label="Owner" value={lead.owner_name} />
-            <FieldRow label="Email" value={lead.email} />
-            <FieldRow label="Phone" value={lead.phone} />
             <FieldRow label="Website" value={lead.website} />
             <FieldRow label="Rating" value={lead.rating != null ? `${lead.rating} (${lead.review_count} reviews)` : null} />
             <FieldRow label="Ownership" value={lead.ownership_type} />
             <FieldRow label="Google Maps" value={lead.google_maps_url} />
           </div>
 
-          {/* Enriched Contact */}
+          {/* Company Contact */}
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Enriched Contact</div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Company Contact</div>
+            <FieldRow label="Company Email" value={lead.company_email} source={meta.company_email?.source} />
+            <FieldRow label="Company Phone" value={lead.company_phone} source={meta.company_phone?.source} />
+          </div>
+
+          {/* Owner Contact */}
+          <div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Owner Contact</div>
             <FieldRow label="Owner Email" value={lead.owner_email} source={meta.owner_email?.source} />
             <FieldRow label="Owner Phone" value={lead.owner_phone} source={meta.owner_phone?.source} />
             <FieldRow label="Owner LinkedIn" value={lead.owner_linkedin} source={meta.owner_linkedin?.source} />

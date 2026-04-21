@@ -27,11 +27,12 @@ export interface PipelineEvent {
   industries?: string[]
   cities?: string[]
   total_queries?: number
-  // outreach events
-  pushed?: number
+  // export events
+  exported?: number
   skipped?: number
-  failed?: number
-  // enrichment / generation events
+  errors?: number
+  reason?: string
+  // enrichment events
   sources?: string[]
   lead_id?: number
   cost?: number
@@ -46,12 +47,11 @@ export interface PipelineEvent {
   kept?: number
   removed?: number
   error?: string
+  generated_subject?: string
+  generated_email?: string
   // insufficient funds
   balance?: number
   estimated_cost?: number
-  // email generation
-  generated_subject?: string
-  generated_email?: string
 }
 
 export interface RunRecord {
@@ -153,6 +153,9 @@ export interface DBLead {
   run_id: number | null
   // enrichable fields
   google_maps_url: string | null
+  owner_name: string | null
+  company_email: string | null
+  company_phone: string | null
   owner_email: string | null
   owner_phone: string | null
   owner_linkedin: string | null

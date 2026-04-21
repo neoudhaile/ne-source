@@ -4,7 +4,7 @@ import { ENRICHABLE_FIELDS } from '../types'
 import { ChevronRight, ChevronDown, Loader2 } from 'lucide-react'
 import { getRunLeads } from '../api'
 
-// ── Field groupings (matches email_generator.py categories) ────────────────
+// ── Field groupings for lead enrichment details ────────────────────────────
 
 const FIELD_GROUPS = [
   {
@@ -47,12 +47,11 @@ const SOURCE_BADGES: Record<string, { label: string; color: string }> = {
   google_places: { label: 'Places', color: 'bg-emerald-800/60 text-emerald-300' },
   hunter: { label: 'Hunter', color: 'bg-green-800/60 text-green-300' },
   apollo: { label: 'Apollo', color: 'bg-blue-800/60 text-blue-300' },
-  sixtyfour: { label: '64', color: 'bg-fuchsia-800/60 text-fuchsia-300' },
+  fullenrich: { label: 'FullEnrich', color: 'bg-fuchsia-800/60 text-fuchsia-300' },
   scrape: { label: 'Scrape', color: 'bg-orange-800/60 text-orange-300' },
   direct: { label: 'Direct', color: 'bg-orange-800/60 text-orange-300' },
   zyte: { label: 'Zyte', color: 'bg-amber-800/60 text-amber-300' },
   direct_then_zyte: { label: 'Direct+Zyte', color: 'bg-orange-900/60 text-amber-200' },
-  claude_discovery: { label: 'Discovery', color: 'bg-violet-800/60 text-violet-300' },
   claude_inferred: { label: 'Claude', color: 'bg-purple-800/60 text-purple-300' },
   constructed: { label: 'Constructed', color: 'bg-gray-700/60 text-gray-300' },
   company_fallback: { label: 'Company', color: 'bg-slate-700/60 text-slate-200' },
@@ -61,16 +60,15 @@ const SOURCE_BADGES: Record<string, { label: string; color: string }> = {
 
 // Step name → which fields it can fill
 const STEP_FIELDS: Record<string, string[]> = {
-  'Claude discovery': [],
   'Google Places': ['google_maps_url'],
   'Google Maps URL': ['google_maps_url'],
   'Hunter.io': ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin', 'key_staff'],
-  'Apollo': ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin', 'employee_count', 'key_staff'],
-  'Sixtyfour': ['owner_email', 'owner_phone', 'employee_count', 'revenue_estimate'],
-  'Website scrape': ['services_offered', 'year_established', 'company_description', 'certifications', 'facebook_url', 'yelp_url', 'employee_count'],
+  'Apollo': ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin', 'employee_count', 'key_staff', 'year_established', 'revenue_estimate', 'company_description', 'facebook_url', 'services_offered'],
+  'FullEnrich': ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin'],
+  'Website scrape': ['owner_name', 'services_offered', 'year_established', 'company_description', 'certifications', 'facebook_url', 'yelp_url', 'employee_count'],
   'Review scrape': ['review_summary'],
   'Company fallback': ['owner_email', 'owner_phone'],
-  'Claude failsafe': ENRICHABLE_FIELDS as unknown as string[],
+  'Claude failsafe': ['employee_count', 'key_staff', 'year_established', 'services_offered', 'company_description', 'revenue_estimate', 'certifications', 'review_summary', 'facebook_url', 'yelp_url'],
 }
 
 function emptyFields(): Record<string, FieldCell> {
@@ -95,16 +93,16 @@ function emptyRow(id: number, company: string, city: string, industry: string): 
 }
 
 function sourceFromStep(step: string): string {
-  if (step.includes('Claude discovery')) return 'claude_discovery'
   if (step.includes('Google Places')) return 'google_places'
   if (step.includes('Hunter')) return 'hunter'
   if (step.includes('Apollo')) return 'apollo'
-  if (step.includes('Website scrape') || step.includes('Review scrape')) return 'scrape'
-  if (step.includes('Claude')) return 'claude_inferred'
-  if (step.includes('Google Maps')) return 'constructed'
-  if (step.includes('Sixtyfour')) return 'sixtyfour'
+  if (step.includes('FullEnrich')) return 'fullenrich'
+  if (step.includes('Website scrape')) return 'scrape'
+  if (step.includes('Review scrape')) return 'scrape'
   if (step.includes('Company fallback')) return 'company_fallback'
-  return 'unknown'
+  if (step.includes('Claude failsafe')) return 'claude_inferred'
+  if (step.includes('Google Maps')) return 'constructed'
+  return 'claude_inferred'
 }
 
 function dbLeadToRow(lead: DBLead): LeadRow {

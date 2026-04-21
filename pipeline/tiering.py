@@ -77,6 +77,13 @@ def _fmt(value):
     return str(value)
 
 
+def _person_linkedin(value):
+    text = _fmt(value)
+    if text and 'linkedin.com/in/' in text.lower():
+        return text
+    return None
+
+
 def _lead_payload(lead: dict) -> dict:
     return {
         'lead_id': lead.get('id'),
@@ -89,7 +96,7 @@ def _lead_payload(lead: dict) -> dict:
         'city': _fmt(lead.get('city')),
         'state': _fmt(lead.get('state')),
         'ownership_type': _fmt(lead.get('ownership_type')),
-        'owner_linkedin': _fmt(lead.get('owner_linkedin')),
+        'owner_linkedin': _person_linkedin(lead.get('owner_linkedin')),
         'employee_count': _fmt(lead.get('employee_count')),
         'revenue_estimate': _fmt(lead.get('revenue_estimate')),
         'services_offered': _fmt(lead.get('services_offered')),

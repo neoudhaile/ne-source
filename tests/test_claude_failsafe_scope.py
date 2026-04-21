@@ -15,7 +15,7 @@ def _run_failsafe_with_response(lead, response_text):
 
 
 def test_failsafe_drops_contact_fields_even_if_claude_returns_them():
-    lead = {'company': 'Acme', 'industry': 'car wash'}
+    lead = {'company': 'Acme', 'industry': 'car wash', 'website': 'https://acme.com'}
     response_text = (
         '{"owner_name": "Fake Owner", "owner_email": "fake@acme.com", '
         '"owner_phone": "555-1234", "owner_linkedin": "https://linkedin.com/fake", '
@@ -28,3 +28,21 @@ def test_failsafe_drops_contact_fields_even_if_claude_returns_them():
     assert 'owner_linkedin' not in enriched
     assert enriched['company_description'] == 'Real description'
     assert enriched['services_offered'] == ['wash']
+
+
+def test_failsafe_skips_when_row_has_no_grounded_evidence():
+    import pipeline.enrichment as mod
+
+    lead = {
+        'company': 'Acme',
+        'city': 'Los Angeles',
+        'state': 'CA',
+        'google_place_id': 'CSV_test123',
+    }
+    with patch.object(mod.claude.messages, 'create') as mock_create:
+        enriched = {}
+        meta = {}
+        cost = mod._step_claude_failsafe(lead, enriched, meta)
+    assert cost == 0.0
+    assert enriched == {}
+    mock_create.assert_not_called()

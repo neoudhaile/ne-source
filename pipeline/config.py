@@ -1,7 +1,6 @@
 SEARCH_PROVIDER = 'openmart'
 
 ENRICH_CONCURRENCY = 3
-GENERATE_CONCURRENCY = 4
 ENRICH_PHASE2_CONCURRENCY = 3
 ENABLE_REVIEW_SCRAPE = False
 FAST_TIMEOUT = 20
@@ -34,6 +33,10 @@ MAX_LEADS_PER_RUN = 1
 LA_LAT           = 34.0522
 LA_LNG           = -118.2437
 GEO_RADIUS_MILES = 40
+
+# Notion export
+ENABLE_NOTION_EXPORT = True
+NOTION_DATABASE_ID = ''
 
 TARGET_CITIES = {
     'los angeles', 'long beach', 'pasadena', 'burbank', 'glendale',

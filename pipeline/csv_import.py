@@ -7,6 +7,7 @@ import csv
 import io
 import json
 import os
+import re
 import anthropic
 from dotenv import load_dotenv
 
@@ -60,13 +61,40 @@ HEADER_ALIASES = {
     'year established': 'year_established',
     'revenue': 'revenue_estimate',
     'annual revenue': 'revenue_estimate',
-    'linkedin': 'owner_linkedin',
-    'linkedin url': 'owner_linkedin',
 }
 
 
 def _normalize_header(header: str) -> str:
     return ' '.join(str(header or '').strip().lower().replace('_', ' ').split())
+
+
+def _looks_like_person_linkedin_url(value: str | None) -> bool:
+    value = str(value or '').strip().lower()
+    return value.startswith('http') and 'linkedin.com/in/' in value
+
+
+def _looks_like_company_linkedin_url(value: str | None) -> bool:
+    value = str(value or '').strip().lower()
+    return value.startswith('http') and 'linkedin.com/company/' in value
+
+
+def _infer_special_header_mapping(header: str, sample_rows: list[dict]) -> str | None:
+    normalized = _normalize_header(header)
+    if normalized not in {'linkedin', 'linkedin url', 'linkedin profile', 'linkedin profile url'}:
+        return None
+
+    values = [
+        str(row.get(header) or '').strip()
+        for row in sample_rows
+        if str(row.get(header) or '').strip()
+    ]
+    if not values:
+        return None
+    if any(_looks_like_company_linkedin_url(value) for value in values):
+        return None
+    if all(_looks_like_person_linkedin_url(value) for value in values):
+        return 'owner_linkedin'
+    return None
 
 
 def map_columns(csv_headers: list[str], sample_rows: list[dict]) -> dict:
@@ -78,7 +106,14 @@ def map_columns(csv_headers: list[str], sample_rows: list[dict]) -> dict:
     direct_mapping = {}
     unresolved_headers = []
     for header in csv_headers:
-        db_col = HEADER_ALIASES.get(_normalize_header(header))
+        normalized = _normalize_header(header)
+        if normalized in {'linkedin', 'linkedin url', 'linkedin profile', 'linkedin profile url'}:
+            db_col = _infer_special_header_mapping(header, sample_rows)
+            if db_col:
+                direct_mapping[header] = db_col
+            continue
+
+        db_col = HEADER_ALIASES.get(normalized)
         if db_col:
             direct_mapping[header] = db_col
         else:
@@ -104,6 +139,7 @@ Rules:
 - "owner_email" = owner's personal/professional email
 - "company_phone" = business phone
 - "owner_phone" = owner's personal phone
+- "owner_linkedin" = a person's LinkedIn profile URL (usually `/in/`), never a company LinkedIn page (`/company/`)
 - "address" = street address (not city/state/zip — those are separate columns)
 - "industry" = business type / category / vertical / trade
 - "website" = company website URL
@@ -167,6 +203,12 @@ def _coerce_value(db_col: str, raw_value: str):
         # Split comma-separated values into a list
         return [v.strip() for v in raw_value.split(',') if v.strip()]
 
+    return raw_value
+
+
+def _sanitize_mapped_value(db_col: str, raw_value):
+    if db_col == 'owner_linkedin' and _looks_like_company_linkedin_url(raw_value):
+        return None
     return raw_value
 
 
@@ -255,7 +297,9 @@ def import_csv(file_content: str | bytes, emit=None) -> dict:
 
     try:
         for i, row in enumerate(rows):
-            lead_dict = {}
+            lead_dict = {
+                'raw_data': json.dumps(row),
+            }
 
             for csv_col, db_col in mapping.items():
                 raw = row.get(csv_col)
@@ -277,7 +321,10 @@ def import_csv(file_content: str | bytes, emit=None) -> dict:
                             lead_dict[k] = v
                     continue
 
-                lead_dict[db_col] = _coerce_value(db_col, raw)
+                coerced = _coerce_value(db_col, raw)
+                sanitized = _sanitize_mapped_value(db_col, coerced)
+                if sanitized is not None:
+                    lead_dict[db_col] = sanitized
 
             # Skip rows with no company name
             if not lead_dict.get('company'):

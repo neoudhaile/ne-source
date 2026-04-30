@@ -93,12 +93,13 @@ def test_apollo_key_staff_from_people_list():
     assert enriched['key_staff'] == ['Jane Smith', 'Bob Jones']
 
 
-def test_apollo_payload_omits_async_phone_flags_and_company_linkedin():
+def test_apollo_payload_omits_async_phone_flags_and_separates_company_linkedin():
     lead = {
         'company': 'Acme Car Wash',
         'website': 'https://acmecarwash.com',
         'owner_name': 'Jane Smith',
         'owner_linkedin': 'https://linkedin.com/company/acme-car-wash',
+        'company_linkedin': 'https://linkedin.com/company/acme-car-wash',
     }
     _, _, _, session = _run_apollo_with_response(lead, APOLLO_RESPONSE)
     payload = session.post.call_args.kwargs['json']
@@ -106,3 +107,4 @@ def test_apollo_payload_omits_async_phone_flags_and_company_linkedin():
     assert 'run_waterfall_phone' not in payload
     assert 'run_waterfall_email' not in payload
     assert 'linkedin_url' not in payload
+    assert payload['organization_linkedin_url'] == 'https://linkedin.com/company/acme-car-wash'

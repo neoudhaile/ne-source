@@ -17,16 +17,16 @@
     {
       "id": 3,
       "title": "Investigate employee_count 126 for all leads (Openmart data issue)",
-      "status": "todo",
+      "status": "fixed",
       "priority": "medium",
-      "notes": "Check raw_data JSONB and normalize.py to see if 126 is a placeholder from Openmart."
+      "notes": "Fixed 2026-04-26: not an Openmart issue. Raw DB rows showed source='csv_import' with raw_data Employees='51 - 200'. csv_import._coerce_value() was converting employee bucket ranges to midpoint ints (51-200 -> 126, 51-100 -> 76). Importer now leaves ranged/plus employee counts null instead of inventing precise values; raw_data still preserves the original bucket."
     },
     {
       "id": 4,
       "title": "Investigate missing email generation for all leads",
-      "status": "todo",
+      "status": "fixed",
       "priority": "medium",
-      "notes": "No generated_subject or generated_email for any lead including fully enriched ones. Check run.py for generation step invocation."
+      "notes": "Closed 2026-04-26: not a live bug. Email generation/outreach was intentionally removed in favor of Notion export, so generated_subject/generated_email remaining blank is expected unless legacy rows already contain them. Investigation docs updated to reflect export as the terminal stage."
     }
   ]
 }

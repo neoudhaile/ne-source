@@ -19,7 +19,7 @@ def get_connection():
 
 LEAD_COLUMNS = [
     'company', 'owner_name', 'company_email', 'company_phone', 'address', 'city', 'state',
-    'zipcode', 'website', 'industry', 'google_place_id', 'rating',
+    'zipcode', 'website', 'company_linkedin', 'industry', 'google_place_id', 'rating',
     'review_count', 'ownership_type', 'distance_miles', 'latitude',
     'longitude', 'openmart_id', 'run_id',
     'owner_email', 'owner_phone', 'owner_linkedin',
@@ -33,7 +33,7 @@ LEAD_COLUMNS = [
 INSERT_LEAD_SQL = """
     INSERT INTO smb_leads (
         company, owner_name, company_email, company_phone, address, city, state,
-        zipcode, website, industry, google_place_id, rating, review_count,
+        zipcode, website, company_linkedin, industry, google_place_id, rating, review_count,
         ownership_type, distance_miles, latitude, longitude, openmart_id, run_id,
         owner_email, owner_phone, owner_linkedin,
         employee_count, key_staff, year_established, services_offered,
@@ -59,11 +59,21 @@ def ensure_run_column(conn):
         cur.close()
 
 
+def ensure_company_linkedin_column(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute('ALTER TABLE smb_leads ADD COLUMN IF NOT EXISTS company_linkedin TEXT')
+        conn.commit()
+    finally:
+        cur.close()
+
+
 def insert_lead(conn, lead_dict):
     values = _lead_values(lead_dict)
     cur = conn.cursor()
     try:
         ensure_run_column(conn)
+        ensure_company_linkedin_column(conn)
         placeholders = '(' + ', '.join(['%s'] * len(LEAD_COLUMNS)) + ')'
         cur.execute(INSERT_LEAD_SQL.replace('VALUES %s', f'VALUES {placeholders}') + ' RETURNING id', values)
         row = cur.fetchone()
@@ -272,6 +282,7 @@ def insert_leads_csv_batch(conn, lead_dicts):
     google_place_id -> inserted row ID for rows that were newly inserted.
     """
     ensure_run_column(conn)
+    ensure_company_linkedin_column(conn)
     prepared = [prepare_csv_lead(lead) for lead in lead_dicts]
     if not prepared:
         return {}
@@ -292,7 +303,7 @@ def insert_leads_csv_batch(conn, lead_dicts):
 
 
 def update_run_cost(run_id: int, cost: float):
-    """Store total enrichment + generation cost on the run."""
+    """Store total enrichment cost on the run."""
     conn = get_connection()
     cur = conn.cursor()
     try:

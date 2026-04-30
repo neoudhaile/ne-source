@@ -6,6 +6,9 @@ ui/dist/
 *.pyc
 .DS_Store
 *.md
+!README.md
+!CLAUDE.md
 !docs/enrichment-investigation.md
+docs/obsidian-vault/
 logs/
 errors.txt

@@ -267,6 +267,11 @@ def _looks_like_person_linkedin(value: str | None) -> bool:
     return text.startswith('http') and 'linkedin.com/in/' in text
 
 
+def _looks_like_company_linkedin(value: str | None) -> bool:
+    text = str(value or '').strip().lower()
+    return text.startswith('http') and 'linkedin.com/company/' in text
+
+
 def _grounded_field_present(lead: dict, enriched: dict, meta: dict, field: str) -> bool:
     value = _value(lead, enriched, field)
     if _is_empty(value):
@@ -402,11 +407,8 @@ def _step_company_contact_fallback(lead: dict, enriched: dict, meta: dict) -> fl
     """
     fallback = {}
     company_email = _value(lead, enriched, 'company_email')
-    company_phone = _value(lead, enriched, 'company_phone')
     if not _value(lead, enriched, 'owner_email') and company_email:
         fallback['owner_email'] = company_email
-    if not _value(lead, enriched, 'owner_phone') and company_phone:
-        fallback['owner_phone'] = company_phone
     if fallback:
         for field, value in fallback.items():
             enriched[field] = value
@@ -675,9 +677,10 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
     owner_name = _value(lead, enriched, 'owner_name') or ''
     domain = _domain_from_website(_value(lead, enriched, 'website'))
     company = _value(lead, enriched, 'company') or ''
+    company_linkedin = _value(lead, enriched, 'company_linkedin') or ''
     # Apollo needs enough context to have a realistic match chance.
     owner_email = _value(lead, enriched, 'owner_email') or ''
-    if not company or (not owner_name and not domain and not owner_email):
+    if not company or (not owner_name and not domain and not owner_email and not company_linkedin):
         return 0.0
     try:
         payload = {
@@ -689,6 +692,8 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
             payload['domain'] = domain
         if owner_email:
             payload['email'] = owner_email
+        if _looks_like_company_linkedin(company_linkedin):
+            payload['organization_linkedin_url'] = str(company_linkedin).strip()
         owner_linkedin = _value(lead, enriched, 'owner_linkedin')
         if _looks_like_person_linkedin(owner_linkedin):
             payload['linkedin_url'] = str(owner_linkedin).strip()

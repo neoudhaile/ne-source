@@ -1,6 +1,6 @@
 """
 CSV import — upload arbitrary CSVs, use Claude to map columns to smb_leads
-schema, insert rows, then hand off to enrichment + email generation.
+schema, insert rows, then hand off to enrichment + Notion export.
 """
 
 import csv
@@ -23,7 +23,7 @@ claude = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 # waterfall skip those fields.
 MAPPABLE_COLUMNS = [
     'company', 'owner_name', 'company_email', 'company_phone', 'address', 'city', 'state',
-    'zipcode', 'website', 'industry', 'rating', 'review_count',
+    'zipcode', 'website', 'company_linkedin', 'industry', 'rating', 'review_count',
     'ownership_type', 'latitude', 'longitude',
     'owner_email', 'owner_phone', 'owner_linkedin',
     'employee_count', 'year_established', 'services_offered',
@@ -90,6 +90,8 @@ def _infer_special_header_mapping(header: str, sample_rows: list[dict]) -> str |
     ]
     if not values:
         return None
+    if all(_looks_like_company_linkedin_url(value) for value in values):
+        return 'company_linkedin'
     if any(_looks_like_company_linkedin_url(value) for value in values):
         return None
     if all(_looks_like_person_linkedin_url(value) for value in values):
@@ -139,6 +141,7 @@ Rules:
 - "owner_email" = owner's personal/professional email
 - "company_phone" = business phone
 - "owner_phone" = owner's personal phone
+- "company_linkedin" = a company's LinkedIn page URL (usually `/company/`)
 - "owner_linkedin" = a person's LinkedIn profile URL (usually `/in/`), never a company LinkedIn page (`/company/`)
 - "address" = street address (not city/state/zip — those are separate columns)
 - "industry" = business type / category / vertical / trade
@@ -184,11 +187,17 @@ def _coerce_value(db_col: str, raw_value: str):
         import re
         match = re.match(r'^\s*(\d[\d,]*)\s*[-to]+\s*(\d[\d,]*)\s*$', raw_value, re.IGNORECASE)
         if match:
+            # Preserve exact ints only. Employee bucket ranges like "51 - 200"
+            # should stay empty rather than turning into fake precision such as 126.
+            if db_col == 'employee_count':
+                return None
             low = int(match.group(1).replace(',', ''))
             high = int(match.group(2).replace(',', ''))
             return int(round((low + high) / 2))
         plus_match = re.match(r'^\s*(\d[\d,]*)\s*\+\s*$', raw_value)
         if plus_match:
+            if db_col == 'employee_count':
+                return None
             return int(plus_match.group(1).replace(',', ''))
         try:
             return int(float(raw_value))
@@ -208,6 +217,8 @@ def _coerce_value(db_col: str, raw_value: str):
 
 def _sanitize_mapped_value(db_col: str, raw_value):
     if db_col == 'owner_linkedin' and _looks_like_company_linkedin_url(raw_value):
+        return None
+    if db_col == 'company_linkedin' and _looks_like_person_linkedin_url(raw_value):
         return None
     return raw_value
 

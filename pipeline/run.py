@@ -296,7 +296,7 @@ def run_pipeline(emit=None, run_id=None, wait_if_paused=None):
 
 
 def run_csv_pipeline(lead_ids: list[int], emit=None, run_id=None, wait_if_paused=None):
-    """Run enrichment + email generation on pre-inserted CSV leads (skip search)."""
+    """Run enrichment + export on pre-inserted CSV leads (skip search)."""
     if emit is None:
         emit = lambda e: None
     reset_x402_flag()

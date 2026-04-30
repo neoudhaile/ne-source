@@ -125,3 +125,20 @@ def test_stage_3_merge_prefers_apollo_then_hunter_then_fullenrich():
     assert captured['owner_name'] == 'Apollo Jane'
     assert captured['owner_phone'] == '555-HUNTER'
     assert captured['owner_linkedin'] == 'https://linkedin.com/fe'
+
+
+def test_company_contact_fallback_only_backfills_owner_email():
+    import pipeline.enrichment as mod
+
+    lead = {
+        'company_email': 'info@acme.com',
+        'company_phone': '555-COMPANY',
+    }
+    enriched = {}
+    meta = {}
+
+    mod._step_company_contact_fallback(lead, enriched, meta)
+
+    assert enriched['owner_email'] == 'info@acme.com'
+    assert meta['owner_email']['source'] == 'company_fallback'
+    assert 'owner_phone' not in enriched

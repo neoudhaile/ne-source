@@ -10,7 +10,7 @@ Out of 19 leads, only 4 get any enrichment. The other 15 exit the waterfall comp
 
 ## Bug 1: Google Places fails to match 15/19 leads
 
-**Status:** Investigating
+**Status:** Fixed (2026-04-20)
 
 **Observed:** Leads like "Palmdale Water District" at "2029 East Avenue Q, Palmdale, California" have both a company name and address, but Google Places returns no match.
 
@@ -57,28 +57,39 @@ Out of 19 leads, only 4 get any enrichment. The other 15 exit the waterfall comp
 
 ## Bug 3: Employee count is 126 for nearly every company
 
-**Status:** Investigating
+**Status:** Fixed (2026-04-26)
 
 **Observed:** Companies ranging from tree services to municipal water districts to energy startups all show `employee_count: 126`. This is clearly wrong.
 
 **Root cause analysis:**
-- This data comes from Openmart (the source API). It's either a default/placeholder value Openmart returns when it doesn't have real employee data, or a parsing bug in how we read Openmart's response.
+- This turned out not to be an Openmart issue at all. The affected rows were `source='csv_import'`, not `source='openmart'`.
+- Raw DB rows showed CSV payloads like `"Employees": "51 - 200"` in `raw_data`.
+- `pipeline/csv_import.py` was coercing integer-looking ranges into midpoint integers. That made employee buckets look precise:
+  - `51 - 200` became `126`
+  - `51 - 100` became `76`
+- Because many imported leads shared the same employee bucket, the UI looked like every company had exactly `126` employees.
 
-**Next steps:**
-1. Check `normalize.py` and `scraper.py` to see how `employee_count` is extracted from Openmart data.
-2. Check `raw_data` JSONB in the DB for one of these leads to see what Openmart actually returns.
+**Fix applied (2026-04-26):**
+- Updated `csv_import._coerce_value()` so `employee_count` only accepts exact integers.
+- Ranged or lower-bound bucket values like `51 - 200` or `10+` now stay null instead of becoming invented precise counts.
+- Kept the original source row in `raw_data`, so the employee bucket is still preserved for future schema changes or display if we want it later.
 
 ---
 
 ## Bug 4: No outreach emails generated for any lead
 
-**Status:** Investigating
+**Status:** Closed (by design, 2026-04-26)
 
 **Observed:** All 19 leads have blank `generated_subject` and `generated_email`, including fully enriched ones like Farwest Corrosion (Tier 2) and Cucamonga Valley Water District.
 
-**Next steps:**
-1. Check `run.py` to see if email generation step is being called.
-2. Check if there's a tier gate or other condition preventing generation.
+**Root cause analysis:**
+- This is not an active pipeline failure. The outreach/email-generation stage was intentionally removed when the pipeline was changed to export enriched leads to Notion instead.
+- `pipeline/run.py` ends with enrichment -> re-tier -> `export_leads_to_notion(...)`.
+- There is no remaining generation step invocation in the live pipeline, so blank `generated_subject` / `generated_email` fields are expected on new runs unless legacy rows already had those fields populated.
+
+**Resolution (2026-04-26):**
+- Closed this investigation item as stale documentation rather than a code bug.
+- Updated comments/docs that still referred to "email generation" so they match the current Notion-export flow.
 
 ---
 
@@ -89,3 +100,5 @@ Out of 19 leads, only 4 get any enrichment. The other 15 exit the waterfall comp
 | 2026-04-20 | Initial investigation doc created. 4 bugs identified from runs 53/54. |
 | 2026-04-20 | Bug 1 fix: added unfiltered search for enrichment, reduced stopwords. |
 | 2026-04-21 | Bug 2 fix: failsafe guard now accepts identity-only leads; dynamic skip reasons emitted. |
+| 2026-04-26 | Bug 3 fix: CSV employee-count ranges no longer coerce to midpoint integers like 126. |
+| 2026-04-26 | Bug 4 closed: email generation was intentionally replaced by Notion export; docs corrected. |

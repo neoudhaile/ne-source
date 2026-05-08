@@ -1,0 +1,62 @@
+{
+  "captured_at": "2026-05-08T04:40:41.835089+00:00",
+  "cleanup": {},
+  "csv": "/Users/neoudhaile/Desktop/simple tier/short.csv",
+  "error_message": null,
+  "event_counts": {
+    "enrich_step_done": 15,
+    "enrich_step_error": 1,
+    "enrich_step_skip": 20,
+    "enrich_step_start": 36,
+    "insert": 3
+  },
+  "fields": {
+    "owner_email": {
+      "all_nonempty": 2,
+      "all_truthful": 2,
+      "kept_nonempty": 2,
+      "kept_truthful": 2,
+      "source_breakdown": {
+        "empty": 1,
+        "hunter": 2
+      }
+    },
+    "owner_name": {
+      "all_nonempty": 2,
+      "all_truthful": 2,
+      "kept_nonempty": 2,
+      "kept_truthful": 2,
+      "source_breakdown": {
+        "empty": 1,
+        "hunter": 2
+      }
+    },
+    "owner_phone": {
+      "all_nonempty": 1,
+      "all_truthful": 1,
+      "kept_nonempty": 1,
+      "kept_truthful": 1,
+      "source_breakdown": {
+        "empty": 2,
+        "sixtyfour": 1
+      }
+    }
+  },
+  "inserted_count": 3,
+  "kept_count": 3,
+  "label": "owner-contact-short-3-orthogonal-com-queryfix-memory",
+  "limit": 3,
+  "mapping": {
+    "Address": "address",
+    "Employees": "employee_count",
+    "Industry": "industry",
+    "LinkedIn": "company_linkedin",
+    "Name": "company",
+    "Revenue": "revenue_estimate",
+    "Year Founded": "year_established"
+  },
+  "mode": "memory",
+  "remaining_count": 3,
+  "run_id": "memory-20260508T043855Z",
+  "status": "completed"
+}

@@ -1,27 +1,13 @@
 import os
-import requests
-from eth_account import Account
-from x402 import x402ClientSync
-from x402.mechanisms.evm.exact.v1.client import ExactEvmSchemeV1
-from x402.http.clients.requests import x402_http_adapter
 from dotenv import load_dotenv
 
 from pipeline.config import SEARCH_PROVIDER
 from pipeline.google_places import get_place_details, search_text
+from pipeline.openmart import search_business_records
 
 load_dotenv()
 
 API_PAGE_SIZE = 50  # internal batch size per Openmart call
-
-
-def _x402_session() -> requests.Session:
-    """Create a fresh x402-backed session per call to avoid shared-session issues."""
-    account = Account.from_key(os.getenv('PRIVATE_KEY'))
-    client = x402ClientSync()
-    client.register_v1('base', ExactEvmSchemeV1(signer=account))
-    session = requests.Session()
-    session.mount('https://', x402_http_adapter(client))
-    return session
 
 
 def search_businesses(query, city, page_size, min_rating, min_reviews, cursor=None):
@@ -63,23 +49,13 @@ def _search_google_places(query, city, page_size, cursor=None):
 def _search_openmart(query, city, page_size, min_rating, min_reviews, cursor=None):
     print(f'  Searching: {query} in {city}...')
     try:
-        payload = {
-            'query': f'{query} in {city}',
-            'page_size': page_size,
-            'min_rating': min_rating,
-            'min_reviews': min_reviews,
-        }
-        if cursor is not None:
-            payload['cursor'] = cursor
-
-        with _x402_session() as session:
-            response = session.post(
-                'https://x402.orth.sh/openmart/api/v1/search',
-                json=payload,
-            )
-        response.raise_for_status()
-        body = response.json()
-        results = body if isinstance(body, list) else body.get('data', [])
+        results = search_business_records(
+            f'{query} in {city}',
+            page_size=page_size,
+            min_rating=min_rating,
+            min_reviews=min_reviews,
+            cursor=cursor,
+        )
         print(f'  Found {len(results)} results')
 
         # Extract cursor from last result for pagination

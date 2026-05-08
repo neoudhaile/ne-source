@@ -1,13 +1,14 @@
 """
 Waterfall enrichment — 7 steps per lead.
 
-Uses Orthogonal APIs (via x402) for steps 1-6, Claude API as failsafe (step 7).
+Uses Orthogonal APIs for paid steps with x402 fallback, Claude API as failsafe.
 Each step only populates fields that are still empty after previous steps.
 """
 
 import logging
 import os
 import json
+import re
 import threading
 import time
 import traceback
@@ -57,8 +58,11 @@ ORTH_BASE = 'https://x402.orth.sh'
 STEP_NAMES = {
     'google_places': 'Google Places',
     'google_maps': 'Google Maps URL',
+    'domain_recovery': 'Domain recovery',
+    'openmart_company': 'Openmart company enrich',
     'hunter': 'Hunter.io',
     'apollo': 'Apollo',
+    'owner_email_followup': 'Owner email follow-up',
     'fullenrich': 'FullEnrich',
     'sixtyfour': 'Sixtyfour',
     'scrape_website': 'Website scrape',
@@ -70,9 +74,13 @@ STEP_NAMES = {
 STEP_SKIP_REASONS = {
     'google_places': 'No company/address data available for place matching, or no place match found.',
     'google_maps': 'No real Google place ID available.',
+    'domain_recovery': 'Lead already has a website, or no recovery providers configured.',
+    'openmart_company': 'No website or social profile available for Openmart company enrich.',
     'hunter': 'No website/domain available for owner-contact lookup.',
     'apollo': 'No usable owner/company context remained for people matching.',
+    'owner_email_followup': 'No grounded owner name and verified domain available for owner-email lookup.',
     'fullenrich': 'No FULLENRICH_API_KEY set, or all owner fields already filled.',
+    'sixtyfour': 'Sixtyfour skipped — owner_phone already filled, or owner_name / verified domain missing.',
     'scrape_website': 'No website available to scrape, or no scraper fallback is configured.',
     'scrape_reviews': 'Review scrape disabled, or no review URL available to scrape.',
     'company_fallback': 'No company email or phone available to reuse.',
@@ -85,40 +93,56 @@ LOW_VALUE_CLAUDE_FIELDS = {
     'yelp_url',
 }
 HUNTER_RETRIES = 2
+SIXTYFOUR_TIMEOUT = int(os.getenv('SIXTYFOUR_TIMEOUT', '90'))
 
 OWNER_FIELD_SOURCE_PRIORITY = {
     'owner_name': {
-        'apollo': 100,
-        'hunter': 80,
-        'fullenrich': 60,
-        'scrape': 50,
+        'hunter': 100,
+        'scrape': 95,
+        'apollo': 90,
+        'apollo_search': 85,
+        'openmart': 80,
+        'fullenrich': 70,
+        'sixtyfour': 65,
         'company_fallback': 10,
         'claude_inferred': 0,
     },
     'owner_email': {
-        'apollo': 100,
-        'hunter': 90,
+        'hunter': 100,
+        'apollo': 90,
+        'openmart': 80,
         'fullenrich': 70,
+        'sixtyfour': 60,
+        'scrape': 50,
         'company_fallback': 10,
         'claude_inferred': 0,
     },
     'owner_phone': {
         'apollo': 100,
-        'hunter': 85,
-        'fullenrich': 70,
-        'company_fallback': 10,
+        'hunter': 90,
+        'openmart': 80,
+        'sixtyfour': 70,
+        'fullenrich': 60,
+        'scrape': 50,
         'claude_inferred': 0,
     },
     'owner_linkedin': {
-        'apollo': 100,
-        'hunter': 70,
-        'fullenrich': 60,
+        'hunter': 100,
+        'apollo': 90,
+        'apollo_search': 85,
+        'openmart': 80,
+        'fullenrich': 70,
+        'sixtyfour': 60,
+        'scrape': 50,
         'claude_inferred': 0,
     },
     'key_staff': {
         'apollo': 100,
         'hunter': 60,
+        'openmart': 50,
         'fullenrich': 40,
+        'sixtyfour': 35,
+        'apollo_search': 30,
         'claude_inferred': 0,
     },
 }
@@ -222,6 +246,75 @@ def check_x402_balance() -> float:
         return 0.0
 
 
+def _has_orthogonal_api_key() -> bool:
+    from pipeline.orthogonal import has_api_key
+    return has_api_key()
+
+
+def _paid_provider_available() -> bool:
+    return not _x402_insufficient or _has_orthogonal_api_key()
+
+
+def _record_x402_status(status_code: int):
+    global _x402_insufficient, _x402_consecutive_402s
+    if status_code == 402:
+        _x402_consecutive_402s += 1
+        if _x402_consecutive_402s >= _X402_CONSECUTIVE_THRESHOLD:
+            _x402_insufficient = True
+    else:
+        _x402_consecutive_402s = 0
+
+
+def _x402_get_json(api: str, path: str, *, query: dict | None = None, timeout: int | float = SLOW_TIMEOUT):
+    session = _x402_session()
+    resp = session.get(f'{ORTH_BASE}/{api}{path}', params=query or {}, timeout=timeout)
+    _record_x402_status(resp.status_code)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _x402_post_json(api: str, path: str, *, body: dict | None = None, timeout: int | float = SLOW_TIMEOUT):
+    session = _x402_session()
+    resp = session.post(f'{ORTH_BASE}/{api}{path}', json=body or {}, timeout=timeout)
+    _record_x402_status(resp.status_code)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _provider_get_json(
+    api: str,
+    path: str,
+    *,
+    query: dict | None = None,
+    timeout: int | float = SLOW_TIMEOUT,
+):
+    from pipeline.orthogonal import call_with_fallback
+    return call_with_fallback(
+        api,
+        path,
+        query=query or {},
+        timeout=timeout,
+        fallback=lambda: _x402_get_json(api, path, query=query, timeout=timeout),
+    )
+
+
+def _provider_post_json(
+    api: str,
+    path: str,
+    *,
+    body: dict | None = None,
+    timeout: int | float = SLOW_TIMEOUT,
+):
+    from pipeline.orthogonal import call_with_fallback
+    return call_with_fallback(
+        api,
+        path,
+        body=body or {},
+        timeout=timeout,
+        fallback=lambda: _x402_post_json(api, path, body=body, timeout=timeout),
+    )
+
+
 def _get_missing(lead: dict, enriched: dict) -> list[str]:
     """Return field names still empty in both lead and enriched."""
     missing = []
@@ -259,7 +352,7 @@ def _source_priority(field: str, source: str | None) -> int:
 
 
 def _is_real_google_place_id(value: str | None) -> bool:
-    return bool(value) and not str(value).startswith('CSV_')
+    return bool(value) and not str(value).startswith(('CSV_', 'BENCH_'))
 
 
 def _looks_like_person_linkedin(value: str | None) -> bool:
@@ -304,6 +397,22 @@ def _generic_email(email: str | None) -> bool:
     return local in GENERIC_EMAIL_PREFIXES
 
 
+def _truthful_owner_email_present(lead: dict, enriched: dict, meta: dict) -> bool:
+    email = _value(lead, enriched, 'owner_email')
+    if not email:
+        return False
+    source = _field_source(meta, 'owner_email')
+    return source not in {None, 'csv_import', 'claude_inferred', 'company_fallback'}
+
+
+def _email_matches_domain(email: str | None, domain: str | None) -> bool:
+    if not email or '@' not in str(email) or not domain:
+        return False
+    email_domain = str(email).split('@', 1)[1].lower().strip()
+    domain = str(domain).lower().strip()
+    return email_domain == domain or email_domain.endswith('.' + domain)
+
+
 def _name_quality(name: str | None) -> int:
     if not name:
         return 0
@@ -314,6 +423,14 @@ def _name_quality(name: str | None) -> int:
     if all(any(ch.isalpha() for ch in token) for token in tokens):
         score += 5
     return score
+
+
+def _same_person_name(left: str | None, right: str | None) -> bool:
+    left_tokens = [token.lower() for token in re.findall(r'[a-z]+', str(left or ''))]
+    right_tokens = [token.lower() for token in re.findall(r'[a-z]+', str(right or ''))]
+    if len(left_tokens) < 2 or len(right_tokens) < 2:
+        return False
+    return left_tokens[0] == right_tokens[0] and left_tokens[-1] == right_tokens[-1]
 
 
 def _email_quality(email: str | None) -> int:
@@ -403,12 +520,16 @@ def _tag_fields(meta: dict, fields: list[str], provider_used: str | None):
 def _step_company_contact_fallback(lead: dict, enriched: dict, meta: dict) -> float:
     """
     Prefer owner-specific contact data from the paid steps, but if none was found,
-    use company-level contact fields so the table and outreach pipeline do not stay blank.
+    use company-level email so the table does not stay blank.
+
+    Company phones are intentionally not promoted to owner_phone; that would
+    inflate owner-phone coverage with business-line data.
     """
     fallback = {}
     company_email = _value(lead, enriched, 'company_email')
     if not _value(lead, enriched, 'owner_email') and company_email:
         fallback['owner_email'] = company_email
+    assert 'owner_phone' not in fallback
     if fallback:
         for field, value in fallback.items():
             enriched[field] = value
@@ -472,12 +593,342 @@ def _step_google_maps(lead: dict, enriched: dict, meta: dict) -> float:
     place_id = _value(lead, enriched, 'google_place_id')
     if (
         place_id and
-        not str(place_id).startswith('CSV_') and
+        _is_real_google_place_id(str(place_id)) and
         not _value(lead, enriched, 'google_maps_url')
     ):
         enriched['google_maps_url'] = f'https://www.google.com/maps/place/?q=place_id:{place_id}'
         meta['google_maps_url'] = {'source': 'constructed'}
     return 0.0
+
+
+# ── Step: Domain recovery — verified website lookup ────────────────────────
+
+def _step_domain_recovery(lead: dict, enriched: dict, meta: dict) -> float:
+    if _value(lead, enriched, 'website'):
+        return 0.0
+
+    from pipeline.config import ENABLE_DOMAIN_RECOVERY
+    if not ENABLE_DOMAIN_RECOVERY:
+        meta['__skip_reason'] = 'Domain recovery disabled.'
+        return 0.0
+
+    from pipeline.config import ENABLE_OPENMART_DOMAIN_RECOVERY
+    if not (
+        ENABLE_OPENMART_DOMAIN_RECOVERY
+        or os.getenv('ORTH_FIND_WEBSITE_PATH', '').strip()
+        or (os.getenv('GOOGLE_CSE_API_KEY', '').strip() and os.getenv('GOOGLE_CSE_ID', '').strip())
+    ):
+        meta['__skip_reason'] = (
+            'Domain recovery skipped — Openmart disabled and neither '
+            'ORTH_FIND_WEBSITE_PATH nor GOOGLE_CSE_API_KEY+GOOGLE_CSE_ID is configured.'
+        )
+        return 0.0
+
+    from pipeline.google_search import find_company_website_with_provider
+    url, provider, rejected = find_company_website_with_provider(
+        company=_value(lead, enriched, 'company'),
+        address=_value(lead, enriched, 'address'),
+        city=_value(lead, enriched, 'city'),
+        state=_value(lead, enriched, 'state'),
+        company_linkedin=_value(lead, enriched, 'company_linkedin'),
+        zipcode=_value(lead, enriched, 'zipcode'),
+    )
+    if not url:
+        if rejected:
+            summary = ', '.join(
+                f"{item.get('provider')}:{item.get('url')}"
+                for item in rejected[:5]
+            )
+            meta['domain_recovery'] = {
+                'source': 'domain_recovery',
+                'rejected_candidates': rejected[:10],
+            }
+            meta['__skip_reason'] = f'No verified website/domain found. Rejected candidates: {summary}'
+        else:
+            meta['__skip_reason'] = 'No verified website/domain found; no business-domain candidates returned.'
+        return 0.0
+
+    enriched['website'] = url
+    meta['website'] = {'source': 'domain_recovery', 'provider': provider or 'unknown'}
+    return 0.0
+
+
+# ── Step: Openmart company enrichment ───────────────────────────────────────
+
+OPENMART_COST_PER_CALL = 0.01
+OPENMART_OWNER_ROLE_KEYWORDS = (
+    'owner', 'founder', 'co-founder', 'president', 'ceo', 'chief executive',
+    'principal', 'managing partner', 'partner', 'general manager',
+    'executive director', 'district manager',
+)
+
+
+def _walk_dicts(value):
+    if isinstance(value, dict):
+        yield value
+        for nested in value.values():
+            yield from _walk_dicts(nested)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _walk_dicts(item)
+
+
+def _first_present(record: dict, keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        value = record.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _name_from_record(record: dict) -> str | None:
+    full = _first_present(record, ('owner_name', 'full_name', 'name', 'person_name', 'contact_name'))
+    if full:
+        return full
+    first = _first_present(record, ('first_name', 'firstname', 'given_name'))
+    last = _first_present(record, ('last_name', 'lastname', 'family_name'))
+    return ' '.join(part for part in (first, last) if part) or None
+
+
+def _openmart_role_score(role: str | None) -> int:
+    text = str(role or '').lower()
+    if not text:
+        return 0
+    for keyword in OPENMART_OWNER_ROLE_KEYWORDS:
+        if keyword in text:
+            return 100
+    return 20
+
+
+def _extract_openmart_owner_contact(data: dict) -> dict:
+    """Extract explicit person/decision-maker fields without guessing."""
+    direct = {
+        'owner_name': _first_present(data, ('owner_name',)),
+        'owner_email': _first_present(data, ('owner_email',)),
+        'owner_phone': _first_present(data, ('owner_phone',)),
+        'owner_linkedin': _first_present(data, ('owner_linkedin', 'owner_linkedin_url')),
+    }
+    direct = {k: v for k, v in direct.items() if v}
+    if direct:
+        return direct
+
+    candidates = []
+    for record in _walk_dicts(data):
+        name = _name_from_record(record)
+        email = _first_present(record, ('email', 'work_email', 'verified_email', 'business_email'))
+        phone = _first_present(record, ('phone', 'phone_number', 'mobile_phone', 'direct_phone', 'work_phone'))
+        linkedin = _first_present(record, ('linkedin', 'linkedin_url', 'person_linkedin_url'))
+        role = _first_present(record, ('title', 'position', 'job_title', 'role'))
+        if not any((name, email, phone, linkedin)):
+            continue
+        role_score = _openmart_role_score(role)
+        if not role_score and not (name and (email or linkedin)):
+            continue
+        score = role_score
+        score += 30 if name else 0
+        score += 30 if email and not _generic_email(email) else 0
+        score += 20 if phone else 0
+        score += 10 if linkedin else 0
+        candidates.append((score, {
+            'owner_name': name,
+            'owner_email': email,
+            'owner_phone': phone,
+            'owner_linkedin': linkedin,
+        }))
+
+    if not candidates:
+        return {}
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return {k: v for k, v in candidates[0][1].items() if v}
+
+
+APOLLO_DECISION_MAKER_TITLES = [
+    'Owner',
+    'Founder',
+    'Co-Founder',
+    'President',
+    'CEO',
+    'Chief Executive Officer',
+    'Principal',
+    'Managing Partner',
+    'Partner',
+    'General Manager',
+    'Executive Director',
+    'District Manager',
+    'Operations Director',
+]
+
+
+def _person_company_name(record: dict) -> str | None:
+    org = record.get('organization') or record.get('account') or {}
+    if isinstance(org, dict):
+        return _first_present(org, ('name', 'organization_name', 'company_name'))
+    return _first_present(record, ('organization_name', 'company_name', 'company'))
+
+
+def _person_company_domain(record: dict) -> str | None:
+    org = record.get('organization') or record.get('account') or {}
+    if isinstance(org, dict):
+        return _first_present(org, ('primary_domain', 'domain', 'website_url'))
+    return _first_present(record, ('organization_domain', 'domain', 'website_url'))
+
+
+def _company_relevance_score(company: str | None, domain: str | None, record: dict) -> int:
+    score = 0
+    person_domain = _person_company_domain(record)
+    if domain and person_domain and domain.lower() in person_domain.lower():
+        score += 60
+    target_tokens = _company_tokens(company)
+    org_name = _person_company_name(record)
+    if target_tokens and org_name:
+        org_tokens = _company_tokens(org_name)
+        overlap = len(target_tokens & org_tokens)
+        if overlap:
+            score += min(40, overlap * 20)
+    return score
+
+
+def _apollo_decision_role_score(title: str | None) -> int:
+    text = str(title or '').lower()
+    if not text:
+        return 0
+    ranked = (
+        ('owner', 100),
+        ('founder', 100),
+        ('co-founder', 100),
+        ('president', 85),
+        ('chief executive', 80),
+        ('ceo', 80),
+        ('principal', 75),
+        ('managing partner', 75),
+        ('partner', 70),
+        ('general manager', 70),
+        ('executive director', 65),
+        ('district manager', 60),
+        ('director', 45),
+        ('manager', 35),
+    )
+    return max((score for keyword, score in ranked if keyword in text), default=0)
+
+
+def _extract_apollo_people(data: dict) -> list[dict]:
+    people = []
+    for key in ('people', 'contacts', 'persons'):
+        value = data.get(key)
+        if isinstance(value, list):
+            people.extend(item for item in value if isinstance(item, dict))
+    person = data.get('person')
+    if isinstance(person, dict):
+        people.append(person)
+    return people
+
+
+def _apollo_person_contact(record: dict) -> dict:
+    result = {}
+    name = _first_present(record, ('name', 'full_name')) or _name_from_record(record)
+    if name and _name_quality(name) < 40:
+        name = None
+    title = _first_present(record, ('title', 'headline', 'position'))
+    linkedin = _first_present(record, ('linkedin_url', 'linkedin'))
+    email = _first_present(record, ('email', 'work_email'))
+    if name:
+        result['owner_name'] = name
+    if email and not _generic_email(email):
+        result['owner_email'] = email
+    if linkedin and _looks_like_person_linkedin(linkedin):
+        result['owner_linkedin'] = linkedin
+    phones = record.get('phone_numbers') or []
+    if isinstance(phones, list) and phones:
+        phone = phones[0].get('sanitized_number') or phones[0].get('raw_number')
+        if phone:
+            result['owner_phone'] = str(phone)
+    if title and name:
+        result['key_staff'] = [f'{name} — {title}']
+    elif name:
+        result['key_staff'] = [name]
+    return result
+
+
+def _search_apollo_decision_maker(lead: dict, enriched: dict) -> dict:
+    company = _value(lead, enriched, 'company')
+    domain = _domain_from_website(_value(lead, enriched, 'website'))
+    if not company and not domain:
+        return {}
+
+    locations = [
+        location for location in (
+            ', '.join(part for part in (_value(lead, enriched, 'city'), _value(lead, enriched, 'state')) if part),
+            _value(lead, enriched, 'state'),
+        )
+        if location
+    ]
+    payload = {
+        'person_titles': APOLLO_DECISION_MAKER_TITLES,
+        'person_seniorities': ['owner', 'founder', 'c_suite', 'partner', 'vp', 'head', 'director', 'manager'],
+        'q_keywords': company or domain,
+        'page': 1,
+        'per_page': 5,
+    }
+    if locations:
+        payload['organization_locations'] = locations
+        payload['person_locations'] = locations
+
+    data = _provider_post_json(
+        'apollo',
+        '/api/v1/mixed_people/api_search',
+        body=payload,
+        timeout=SLOW_TIMEOUT,
+    )
+    candidates = []
+    for person in _extract_apollo_people(data or {}):
+        title = _first_present(person, ('title', 'headline', 'position'))
+        role_score = _apollo_decision_role_score(title)
+        relevance = _company_relevance_score(company, domain, person)
+        contact = _apollo_person_contact(person)
+        if not contact.get('owner_name') or (role_score < 35 and relevance < 40):
+            continue
+        score = role_score + relevance
+        score += 15 if contact.get('owner_linkedin') else 0
+        score += 20 if contact.get('owner_email') else 0
+        candidates.append((score, contact))
+    if not candidates:
+        return {}
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def _step_openmart_company(lead: dict, enriched: dict, meta: dict) -> float:
+    from pipeline.config import ENABLE_OPENMART_COMPANY_ENRICH
+
+    if not ENABLE_OPENMART_COMPANY_ENRICH:
+        meta['__skip_reason'] = 'Openmart company enrich disabled.'
+        return 0.0
+
+    target_fields = ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin']
+    if all(_value(lead, enriched, field) for field in target_fields):
+        meta['__skip_reason'] = 'Openmart company enrich skipped — owner fields already filled'
+        return 0.0
+
+    website = _value(lead, enriched, 'website')
+    company_linkedin = _value(lead, enriched, 'company_linkedin')
+    social_media_link = company_linkedin if _looks_like_company_linkedin(company_linkedin) else None
+    if not website and not social_media_link:
+        meta['__skip_reason'] = 'Openmart company enrich skipped — no website or company social profile'
+        return 0.0
+
+    if _x402_insufficient and not os.getenv('ORTHOGONAL_API_KEY', '').strip():
+        meta['__skip_reason'] = 'Openmart company enrich skipped — insufficient x402 balance'
+        return 0.0
+
+    from pipeline.openmart import enrich_company
+    data = enrich_company(company_website=website, social_media_link=social_media_link)
+    result = _extract_openmart_owner_contact(data)
+    if not result:
+        meta['__skip_reason'] = 'Openmart company enrich returned no owner contact'
+        return OPENMART_COST_PER_CALL if data else 0.0
+
+    _merge(enriched, meta, result, 'openmart')
+    return OPENMART_COST_PER_CALL
 
 
 # ── Step 4: Hunter.io — email lookup ───────────────────────────────────────
@@ -488,6 +939,7 @@ HUNTER_ROLE_RANK = [
     ('president', 80),
     ('ceo', 70), ('chief executive', 70),
     ('principal', 60), ('managing partner', 60), ('partner', 55),
+    ('general manager', 50), ('executive director', 50),
     ('vp', 40), ('vice president', 40),
 ]
 
@@ -503,9 +955,82 @@ def _hunter_role_score(position: str | None) -> int:
     return best
 
 
+def _company_acronym(company: str | None) -> str | None:
+    tokens = []
+    for token in re.findall(r'[a-z0-9]+', str(company or '').lower()):
+        if token in {'the', 'inc', 'llc', 'co', 'company', 'corporation', 'corp', 'of'}:
+            continue
+        tokens.append(token)
+    acronym = ''.join(token[0] for token in tokens if token)
+    if 3 <= len(acronym) <= 6:
+        return acronym
+    return None
+
+
+def _hunter_domain_candidates(company: str | None, domain: str | None) -> list[str]:
+    candidates = []
+    if domain:
+        candidates.append(domain)
+    acronym = _company_acronym(company)
+    if acronym:
+        candidates.extend([f'{acronym}.com', f'{acronym}.org'])
+    out = []
+    seen = set()
+    for candidate in candidates:
+        candidate = candidate.lower().strip()
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            out.append(candidate)
+    return out
+
+
+def _hunter_email_finder(owner_name: str, domain_candidates: list[str], company: str | None = None, lead_id=None) -> dict:
+    result = {}
+    for finder_domain in domain_candidates:
+        try:
+            parts = str(owner_name).split()
+            finder_params = {'domain': finder_domain, 'full_name': str(owner_name)}
+            if parts:
+                finder_params['first_name'] = parts[0]
+            if len(parts) > 1:
+                finder_params['last_name'] = ' '.join(parts[1:])
+            finder_data = _provider_get_json(
+                'hunter',
+                '/v2/email-finder',
+                query=finder_params,
+                timeout=SLOW_TIMEOUT,
+            )
+            finder_data = finder_data.get('data', finder_data) or {}
+            first = str(finder_data.get('first_name') or '').strip()
+            last = str(finder_data.get('last_name') or '').strip()
+            full_name = ' '.join(p for p in (first, last) if p).strip()
+            if full_name and not _same_person_name(full_name, owner_name):
+                continue
+            email = str(finder_data.get('email') or '').strip()
+            if email and not _generic_email(email):
+                result['owner_email'] = email
+            if full_name and _same_person_name(full_name, owner_name):
+                result['owner_name'] = full_name
+            for key in ('linkedin', 'linkedin_url'):
+                if finder_data.get(key) and _looks_like_person_linkedin(finder_data.get(key)):
+                    result['owner_linkedin'] = str(finder_data[key]).strip()
+                    break
+            for key in ('phone_number', 'phone'):
+                if finder_data.get(key):
+                    result['owner_phone'] = str(finder_data[key]).strip()
+                    break
+            if result.get('owner_email'):
+                break
+        except Exception as finder_error:
+            _error_logger.error(
+                'Hunter email-finder soft failure lead_id=%s company=%s domain=%s owner_name=%s error=%s',
+                lead_id, company, finder_domain, owner_name, finder_error,
+            )
+    return result
+
+
 def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
-    global _x402_insufficient, _x402_consecutive_402s
-    if _x402_insufficient:
+    if not _paid_provider_available():
         return 0.0
     target_fields = ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin', 'key_staff']
     missing = [f for f in target_fields if not _value(lead, enriched, f)]
@@ -515,26 +1040,37 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
     company = _value(lead, enriched, 'company')
     if not domain or not company:
         return 0.0
+    domain_candidates = _hunter_domain_candidates(company, domain)
 
     last_error = None
     for attempt in range(HUNTER_RETRIES + 1):
         try:
-            session = _x402_session()
-            resp = session.get(
-                f'{ORTH_BASE}/hunter/v2/domain-search',
-                params={'domain': domain, 'limit': 5},
-                timeout=SLOW_TIMEOUT,
-            )
-            if resp.status_code == 402:
-                _x402_consecutive_402s += 1
-                if _x402_consecutive_402s >= _X402_CONSECUTIVE_THRESHOLD:
-                    _x402_insufficient = True
-            else:
-                _x402_consecutive_402s = 0
-            resp.raise_for_status()
-            data = resp.json()
-            email_data = data.get('data', {}) or {}
-            emails = email_data.get('emails', []) or []
+            data = {}
+            emails = []
+            active_domain = domain
+            domain_errors = []
+            for candidate_domain in domain_candidates:
+                try:
+                    data = _provider_get_json(
+                        'hunter',
+                        '/v2/domain-search',
+                        query={'domain': candidate_domain, 'limit': 5},
+                        timeout=SLOW_TIMEOUT,
+                    )
+                except Exception as domain_error:
+                    _error_logger.error(
+                        'Hunter domain-search soft failure lead_id=%s company=%s domain=%s error=%s',
+                        lead.get('id'), company, candidate_domain, domain_error,
+                    )
+                    domain_errors.append(domain_error)
+                    continue
+                email_data = data.get('data', data) or {}
+                emails = email_data.get('emails', []) or []
+                active_domain = candidate_domain
+                if emails:
+                    break
+            if not data and domain_errors:
+                raise domain_errors[-1]
 
             def candidate_name(c: dict) -> str | None:
                 first = (c.get('first_name') or '').strip()
@@ -559,7 +1095,8 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
                     return True
                 position = (c.get('position') or '').lower()
                 return any(k in position for k in
-                           ('owner', 'founder', 'president', 'ceo', 'principal'))
+                           ('owner', 'founder', 'president', 'ceo', 'principal',
+                            'general manager', 'executive director'))
 
             # Select owner: executives first, ranked by role then confidence.
             executives = [c for c in emails if is_executive(c)]
@@ -573,19 +1110,25 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
             else:
                 best = None
 
-            result = {}
+            hunter_result = {}
+            apollo_search_result = {}
+            existing_owner_name = _value(lead, enriched, 'owner_name')
             if best:
-                if best.get('value'):
-                    result['owner_email'] = str(best['value']).strip()
                 best_name = candidate_name(best)
-                if best_name:
-                    result['owner_name'] = best_name
+                best_matches_existing = (
+                    not existing_owner_name
+                    or (best_name and _same_person_name(best_name, existing_owner_name))
+                )
+                if best_matches_existing and best.get('value'):
+                    hunter_result['owner_email'] = str(best['value']).strip()
+                if best_name and not existing_owner_name:
+                    hunter_result['owner_name'] = best_name
                 best_phone = candidate_phone(best)
-                if best_phone:
-                    result['owner_phone'] = best_phone
+                if best_matches_existing and best_phone:
+                    hunter_result['owner_phone'] = best_phone
                 best_linkedin = candidate_linkedin(best)
-                if best_linkedin:
-                    result['owner_linkedin'] = best_linkedin
+                if best_matches_existing and best_linkedin:
+                    hunter_result['owner_linkedin'] = best_linkedin
 
             # key_staff: all returned people as "Name — Position"
             staff = []
@@ -601,53 +1144,29 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
                 if entry not in staff:
                     staff.append(entry)
             if staff:
-                result['key_staff'] = staff
+                hunter_result['key_staff'] = staff
+
+            if not (hunter_result.get('owner_name') or _value(lead, enriched, 'owner_name')):
+                try:
+                    apollo_search_result = _search_apollo_decision_maker(lead, enriched)
+                except Exception as search_error:
+                    _error_logger.error(
+                        'Apollo decision-maker search soft failure lead_id=%s company=%s domain=%s error=%s',
+                        lead.get('id'), company, domain, search_error,
+                    )
 
             # email-finder follow-up (useful when owner_name came from scrape)
-            owner_name = result.get('owner_name') or _value(lead, enriched, 'owner_name')
-            if owner_name:
-                try:
-                    parts = str(owner_name).split()
-                    finder_params = {'domain': domain, 'full_name': str(owner_name)}
-                    if parts:
-                        finder_params['first_name'] = parts[0]
-                    if len(parts) > 1:
-                        finder_params['last_name'] = ' '.join(parts[1:])
-                    finder_resp = session.get(
-                        f'{ORTH_BASE}/hunter/v2/email-finder',
-                        params=finder_params,
-                        timeout=SLOW_TIMEOUT,
-                    )
-                    if finder_resp.status_code == 402:
-                        _x402_consecutive_402s += 1
-                        if _x402_consecutive_402s >= _X402_CONSECUTIVE_THRESHOLD:
-                            _x402_insufficient = True
-                    else:
-                        _x402_consecutive_402s = 0
-                    finder_resp.raise_for_status()
-                    finder_data = finder_resp.json().get('data', {}) or {}
-                    if finder_data.get('email'):
-                        result['owner_email'] = str(finder_data['email']).strip()
-                    first = str(finder_data.get('first_name') or '').strip()
-                    last = str(finder_data.get('last_name') or '').strip()
-                    full_name = ' '.join(p for p in (first, last) if p).strip()
-                    if full_name:
-                        result['owner_name'] = full_name
-                    for key in ('linkedin', 'linkedin_url'):
-                        if finder_data.get(key) and _looks_like_person_linkedin(finder_data.get(key)):
-                            result['owner_linkedin'] = str(finder_data[key]).strip()
-                            break
-                    for key in ('phone_number', 'phone'):
-                        if finder_data.get(key):
-                            result['owner_phone'] = str(finder_data[key]).strip()
-                            break
-                except Exception as finder_error:
-                    _error_logger.error(
-                        'Hunter email-finder soft failure lead_id=%s company=%s domain=%s owner_name=%s error=%s',
-                        lead.get('id'), company, domain, owner_name, finder_error,
-                    )
+            owner_name = (
+                hunter_result.get('owner_name')
+                or apollo_search_result.get('owner_name')
+                or _value(lead, enriched, 'owner_name')
+            )
+            if owner_name and not hunter_result.get('owner_email'):
+                finder_domains = [active_domain] + [d for d in domain_candidates if d != active_domain]
+                hunter_result.update(_hunter_email_finder(owner_name, finder_domains, company=company, lead_id=lead.get('id')))
 
-            _merge(enriched, meta, result, 'hunter')
+            _merge(enriched, meta, apollo_search_result, 'apollo_search')
+            _merge(enriched, meta, hunter_result, 'hunter')
             return 0.01
         except requests.exceptions.Timeout as e:
             last_error = e
@@ -663,8 +1182,7 @@ def _step_hunter(lead: dict, enriched: dict, meta: dict) -> float:
 # ── Step 5: Apollo — people match ──────────────────────────────────────────
 
 def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
-    global _x402_insufficient, _x402_consecutive_402s
-    if _x402_insufficient:
+    if not _paid_provider_available():
         return 0.0
     owner_target_fields = ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin']
     org_target_fields = ['year_established', 'revenue_estimate', 'company_description',
@@ -703,32 +1221,26 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
             if len(parts) > 1:
                 payload['first_name'] = parts[0]
                 payload['last_name'] = ' '.join(parts[1:])
-        session = _x402_session()
-        resp = session.post(
-            f'{ORTH_BASE}/apollo/api/v1/people/match',
-            json=payload,
-                timeout=SLOW_TIMEOUT,
-            )
-        if resp.status_code == 402:
-            _x402_consecutive_402s += 1
-            if _x402_consecutive_402s >= _X402_CONSECUTIVE_THRESHOLD:
-                _x402_insufficient = True
-        else:
-            _x402_consecutive_402s = 0
-        resp.raise_for_status()
-        data = resp.json()
+        data = _provider_post_json(
+            'apollo',
+            '/api/v1/people/match',
+            body=payload,
+            timeout=SLOW_TIMEOUT,
+        )
         person = data.get('person') or {}
         org = person.get('organization') or {}
         result = {}
-        if person.get('name'):
+        person_name = person.get('name')
+        person_matches_request = not owner_name or _same_person_name(str(person_name or ''), owner_name)
+        if person_name and person_matches_request:
             result['owner_name'] = person['name']
-        if person.get('email'):
+        if person_matches_request and person.get('email'):
             result['owner_email'] = person['email']
-        if person.get('phone_numbers'):
+        if person_matches_request and person.get('phone_numbers'):
             phones = person['phone_numbers']
             if phones:
                 result['owner_phone'] = phones[0].get('sanitized_number') or phones[0].get('raw_number')
-        if _looks_like_person_linkedin(person.get('linkedin_url')):
+        if person_matches_request and _looks_like_person_linkedin(person.get('linkedin_url')):
             result['owner_linkedin'] = person['linkedin_url']
         # Organization fields
         if org.get('founded_year'):
@@ -768,102 +1280,270 @@ def _step_apollo(lead: dict, enriched: dict, meta: dict) -> float:
 
 # ── Step 4: Sixtyfour — lead enrichment ────────────────────────────────────
 
-def _step_sixtyfour(lead: dict, enriched: dict, meta: dict) -> float:
-    target_fields = ['owner_email', 'owner_phone',
-                     'employee_count', 'revenue_estimate']
-    missing = [f for f in target_fields if not (enriched.get(f) or lead.get(f))]
-    if not missing:
+def _extract_sixtyfour_owner_contact(data: dict) -> dict:
+    candidates = []
+    for record in _walk_dicts(data or {}):
+        name = _name_from_record(record)
+        email = _first_present(record, ('owner_email', 'email', 'work_email', 'verified_email', 'business_email'))
+        phone = _first_present(record, ('owner_phone', 'phone', 'phone_number', 'mobile_phone', 'direct_phone', 'work_phone'))
+        linkedin = _first_present(record, ('owner_linkedin', 'linkedin', 'linkedin_url', 'person_linkedin_url'))
+        title = _first_present(record, ('title', 'position', 'job_title', 'role'))
+        if not any((name, email, phone, linkedin)):
+            continue
+        role_score = max(_openmart_role_score(title), _apollo_decision_role_score(title))
+        if not role_score and not (name and (email or phone or linkedin)):
+            continue
+        score = role_score
+        score += 30 if name else 0
+        score += 30 if email and not _generic_email(email) else 0
+        score += 25 if phone else 0
+        score += 10 if linkedin and _looks_like_person_linkedin(linkedin) else 0
+        result = {
+            'owner_name': name,
+            'owner_email': email,
+            'owner_phone': phone,
+            'owner_linkedin': linkedin if _looks_like_person_linkedin(linkedin) else None,
+        }
+        if name and title:
+            result['key_staff'] = [f'{name} — {title}']
+        elif name:
+            result['key_staff'] = [name]
+        candidates.append((score, result))
+    if not candidates:
+        return {}
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return {k: v for k, v in candidates[0][1].items() if v}
+
+
+def _sixtyfour_company_payload(lead: dict, enriched: dict, domain: str | None) -> dict:
+    target_company = {
+        'name': _value(lead, enriched, 'company'),
+        'website': _value(lead, enriched, 'website'),
+        'domain': domain,
+        'address': _value(lead, enriched, 'address'),
+        'city': _value(lead, enriched, 'city'),
+        'state': _value(lead, enriched, 'state'),
+        'industry': _value(lead, enriched, 'industry'),
+        'company_email': _value(lead, enriched, 'company_email'),
+        'company_phone': _value(lead, enriched, 'company_phone'),
+    }
+    return {
+        'target_company': {k: v for k, v in target_company.items() if v},
+        'find_people': True,
+        'struct': {
+            'owner_name': 'Full name of the most senior owner, founder, president, CEO, general manager, or executive director.',
+            'owner_email': 'Verified business email for that person, if available.',
+            'owner_phone': 'Direct phone or mobile phone for that person, if available.',
+            'owner_linkedin': 'LinkedIn profile URL for that person, if available.',
+            'decision_makers': [
+                {
+                    'name': 'Full name',
+                    'title': 'Role/title',
+                    'email': 'Business email',
+                    'phone': 'Direct phone',
+                    'linkedin_url': 'LinkedIn profile URL',
+                }
+            ],
+        },
+        'lead_struct': {
+            'name': 'Full name',
+            'title': 'Role/title',
+            'email': 'Business email',
+            'phone': 'Direct phone',
+            'linkedin_url': 'LinkedIn profile URL',
+        },
+        'people_focus_prompt': (
+            'Find the most senior decision maker for this organization. Prefer literal owners, founders, '
+            'presidents, CEOs, principals, or managing partners. If the organization is a public agency, '
+            'utility, district, nonprofit, or municipality with no owner, return the general manager, '
+            'executive director, or equivalent top operating executive. Only return contact details that '
+            'are explicitly grounded in sources.'
+        ),
+        'research_plan': (
+            'Search the company website, leadership/team pages, public profiles, and reputable business '
+            'directories for a senior decision maker and direct business contact data.'
+        ),
+    }
+
+
+def _sixtyfour_phone_payload(lead: dict, enriched: dict, domain: str) -> dict:
+    owner_name = _value(lead, enriched, 'owner_name')
+    owner_email = _value(lead, enriched, 'owner_email')
+    owner_linkedin = _value(lead, enriched, 'owner_linkedin')
+    company = _value(lead, enriched, 'company')
+    location = f"{_value(lead, enriched, 'city') or ''}, {_value(lead, enriched, 'state') or ''}".strip(', ')
+    lead_info = {
+        'name': str(owner_name),
+        'company': str(company),
+        'domain': domain,
+        'location': location,
+    }
+    if owner_email:
+        lead_info['email'] = str(owner_email)
+    if _looks_like_person_linkedin(owner_linkedin):
+        lead_info['linkedin_url'] = str(owner_linkedin)
+
+    payload = {
+        'lead': lead_info,
+        'name': str(owner_name),
+        'company': str(company),
+        'domain': domain,
+    }
+    if owner_email:
+        payload['email'] = str(owner_email)
+    if _looks_like_person_linkedin(owner_linkedin):
+        payload['linkedin_url'] = str(owner_linkedin)
+    return payload
+
+
+def _sixtyfour_email_payload(lead: dict, enriched: dict, domain: str) -> dict:
+    owner_name = _value(lead, enriched, 'owner_name')
+    owner_linkedin = _value(lead, enriched, 'owner_linkedin')
+    company = _value(lead, enriched, 'company')
+    location = f"{_value(lead, enriched, 'city') or ''}, {_value(lead, enriched, 'state') or ''}".strip(', ')
+    payload = {
+        'lead': {
+            'name': str(owner_name),
+            'company': str(company),
+            'domain': domain,
+            'location': location,
+        },
+        'name': str(owner_name),
+        'company': str(company),
+        'domain': domain,
+    }
+    if _looks_like_person_linkedin(owner_linkedin):
+        payload['lead']['linkedin_url'] = str(owner_linkedin)
+        payload['linkedin_url'] = str(owner_linkedin)
+    return payload
+
+
+def _extract_sixtyfour_email(data: dict, owner_name: str | None, domain: str | None) -> str | None:
+    for record in _walk_dicts(data or {}):
+        email = _first_present(record, ('owner_email', 'email', 'work_email', 'verified_email', 'business_email'))
+        if not email or _generic_email(email):
+            continue
+        returned_name = _name_from_record(record)
+        if returned_name and owner_name and not _same_person_name(returned_name, owner_name):
+            continue
+        if _email_matches_domain(email, domain) or record.get('verified') or record.get('confidence'):
+            return str(email).strip()
+    return None
+
+
+def _step_owner_email_followup(lead: dict, enriched: dict, meta: dict) -> float:
+    if not _paid_provider_available():
         return 0.0
-    cost = 0.0
-    domain = _domain_from_website(lead.get('website'))
+    if _truthful_owner_email_present(lead, enriched, meta):
+        meta['__skip_reason'] = 'Owner email follow-up skipped — truthful owner_email already filled'
+        return 0.0
 
-    # enrich-lead
+    website = _value(lead, enriched, 'website')
+    domain = _domain_from_website(website)
+    if not domain or not str(website or '').lower().startswith(('http://', 'https://')):
+        meta['__skip_reason'] = 'Owner email follow-up skipped — no verified domain'
+        return 0.0
+
+    owner_name = _value(lead, enriched, 'owner_name')
+    company = _value(lead, enriched, 'company')
+    if not owner_name or not company:
+        meta['__skip_reason'] = 'Owner email follow-up skipped — no grounded owner or senior decision-maker name'
+        return 0.0
+
+    total_cost = 0.0
+    result = _hunter_email_finder(
+        str(owner_name),
+        _hunter_domain_candidates(company, domain),
+        company=company,
+        lead_id=lead.get('id'),
+    )
+    total_cost += 0.01
+    if result.get('owner_email'):
+        _merge(enriched, meta, result, 'hunter')
+        return total_cost
+
     try:
-        with _x402_session() as session:
-            resp = session.post(
-                f'{ORTH_BASE}/sixtyfour/enrich-lead',
-                json={
-                    'lead_info': {
-                        'name': lead.get('owner_name') or '',
-                        'company': lead.get('company') or '',
-                        'location': f"{lead.get('city', '')}, {lead.get('state', '')}",
-                        'domain': domain or '',
-                    },
-                    'struct': {
-                        'title': 'Job title or role',
-                        'employee_count': 'Number of employees',
-                        'revenue': 'Estimated annual revenue',
-                    },
-                },
-                timeout=SLOW_TIMEOUT,
-            )
-        resp.raise_for_status()
-        data = resp.json()
-        cost += 0.10
-        result = {}
-        if data.get('employee_count'):
-            try:
-                result['employee_count'] = int(data['employee_count'])
-            except (ValueError, TypeError):
-                pass
-        if data.get('revenue'):
-            result['revenue_estimate'] = str(data['revenue'])
-        _merge(enriched, meta, result, 'sixtyfour')
-    except requests.exceptions.Timeout:
-        raise RuntimeError('Sixtyfour enrich-lead: timed out (60s)')
+        data = _provider_post_json(
+            'sixtyfour',
+            '/find-email',
+            body=_sixtyfour_email_payload(lead, enriched, domain),
+            timeout=SIXTYFOUR_TIMEOUT,
+        )
     except Exception as e:
-        raise RuntimeError(f'Sixtyfour enrich-lead: {e}')
+        raise RuntimeError(f'Sixtyfour find-email: {e}')
 
-    # find-email if still missing
-    if not (enriched.get('owner_email') or lead.get('owner_email')):
+    total_cost += 0.30
+    email = _extract_sixtyfour_email(data or {}, str(owner_name), domain)
+    if not email:
+        meta['__skip_reason'] = 'Owner email follow-up ran but returned no owner-specific email'
+        return total_cost
+
+    _merge(enriched, meta, {'owner_email': email}, 'sixtyfour')
+    return total_cost
+
+
+def _step_sixtyfour(lead: dict, enriched: dict, meta: dict) -> float:
+    if not _paid_provider_available():
+        return 0.0
+    if _value(lead, enriched, 'owner_phone'):
+        meta['__skip_reason'] = 'Phone provider skipped — owner_phone already filled'
+        return 0.0
+
+    website = _value(lead, enriched, 'website')
+    domain = _domain_from_website(website)
+    if not domain or not str(website or '').lower().startswith(('http://', 'https://')):
+        meta['__skip_reason'] = 'Phone provider skipped — no verified domain'
+        return 0.0
+
+    company = _value(lead, enriched, 'company')
+    if not company:
+        meta['__skip_reason'] = 'Phone provider skipped due to missing company name'
+        return 0.0
+
+    total_cost = 0.0
+    if not _value(lead, enriched, 'owner_name'):
         try:
-            with _x402_session() as session:
-                resp = session.post(
-                    f'{ORTH_BASE}/sixtyfour/find-email',
-                    json={
-                        'lead': {
-                            'name': lead.get('owner_name') or '',
-                            'company': lead.get('company') or '',
-                            'domain': domain or '',
-                        },
-                        'mode': 'PROFESSIONAL',
-                    },
-                    timeout=SLOW_TIMEOUT,
-                )
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get('email'):
-                _merge(enriched, meta, {'owner_email': data['email']}, 'sixtyfour')
-        except requests.exceptions.Timeout:
-            raise RuntimeError('Sixtyfour find-email: timed out (60s)')
+            company_data = _provider_post_json(
+                'sixtyfour',
+                '/enrich-company',
+                body=_sixtyfour_company_payload(lead, enriched, domain),
+                timeout=SIXTYFOUR_TIMEOUT,
+            )
         except Exception as e:
-            raise RuntimeError(f'Sixtyfour find-email: {e}')
+            raise RuntimeError(f'Sixtyfour enrich-company: {e}')
+        contact = _extract_sixtyfour_owner_contact(company_data or {})
+        if contact:
+            _merge(enriched, meta, contact, 'sixtyfour')
+        total_cost += 0.10
 
-    # find-phone if still missing
-    if not (enriched.get('owner_phone') or lead.get('owner_phone')):
-        try:
-            with _x402_session() as session:
-                resp = session.post(
-                    f'{ORTH_BASE}/sixtyfour/find-phone',
-                    json={
-                        'lead': {
-                            'name': lead.get('owner_name') or '',
-                            'company': lead.get('company') or '',
-                            'domain': domain or '',
-                        },
-                    },
-                    timeout=SLOW_TIMEOUT,
-                )
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get('phone'):
-                _merge(enriched, meta, {'owner_phone': data['phone']}, 'sixtyfour')
-        except requests.exceptions.Timeout:
-            raise RuntimeError('Sixtyfour find-phone: timed out (60s)')
-        except Exception as e:
-            raise RuntimeError(f'Sixtyfour find-phone: {e}')
+    owner_name = _value(lead, enriched, 'owner_name')
+    if not owner_name:
+        meta['__skip_reason'] = 'Phone provider skipped — no owner or senior decision-maker name found'
+        return total_cost
 
-    return cost
+    if _value(lead, enriched, 'owner_phone'):
+        return total_cost
+
+    try:
+        data = _provider_post_json(
+            'sixtyfour',
+            '/find-phone',
+            body=_sixtyfour_phone_payload(lead, enriched, domain),
+            timeout=SIXTYFOUR_TIMEOUT,
+        )
+    except Exception as e:
+        raise RuntimeError(f'Sixtyfour find-phone: {e}')
+
+    data = data or {}
+    phone = data.get('phone') or data.get('owner_phone')
+    if not phone and isinstance(data.get('person'), dict):
+        phone = data['person'].get('phone') or data['person'].get('phone_number')
+    if not phone:
+        meta['__skip_reason'] = 'Phone provider returned no phone'
+        return total_cost + 0.30
+
+    _merge(enriched, meta, {'owner_phone': str(phone).strip()}, 'sixtyfour')
+    return total_cost + 0.30
 
 
 # ── Step: FullEnrich — paid fallback for owner contact ────────────────────
@@ -875,9 +1555,11 @@ def _step_fullenrich(lead: dict, enriched: dict, meta: dict) -> float:
     target_fields = ['owner_name', 'owner_email', 'owner_phone']
     missing = [f for f in target_fields if not _value(lead, enriched, f)]
     if not missing:
+        meta['__skip_reason'] = 'FullEnrich skipped — all owner fields already filled'
         return 0.0
     company = _value(lead, enriched, 'company') or ''
     if not company:
+        meta['__skip_reason'] = 'FullEnrich skipped — missing company name'
         return 0.0
     try:
         result = fullenrich.enrich_person(
@@ -891,6 +1573,7 @@ def _step_fullenrich(lead: dict, enriched: dict, meta: dict) -> float:
     except Exception as e:
         raise RuntimeError(f'FullEnrich: {e}')
     if not result:
+        meta['__skip_reason'] = 'FullEnrich returned no new owner data'
         return 0.0
     _merge(enriched, meta, result, 'fullenrich')
     return fullenrich.FULLENRICH_COST_PER_CALL
@@ -899,7 +1582,8 @@ def _step_fullenrich(lead: dict, enriched: dict, meta: dict) -> float:
 # ── Step 5: ScrapeGraphAI — website scrape ─────────────────────────────────
 
 def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
-    target_fields = ['owner_name', 'services_offered', 'year_established',
+    target_fields = ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin',
+                     'services_offered', 'year_established',
                      'company_description', 'certifications', 'facebook_url',
                      'yelp_url', 'employee_count', 'company_email', 'company_phone']
     missing = [f for f in target_fields if not (enriched.get(f) or lead.get(f))]
@@ -924,10 +1608,16 @@ def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
             'Do not guess or infer email addresses or phone numbers. '
             'For owner_name, look in About Us, Team, Leadership, or bio sections — '
             'identify the Owner, Founder, Co-Founder, President, or CEO by name '
-            'when the role is explicit. If multiple owners, return the primary one. '
+            'when the role is explicit. If this is a public agency, utility, district, '
+            'municipality, or nonprofit with no literal owner, return the General Manager, '
+            'Executive Director, or equivalent top operating executive instead. '
+            'For owner_email, owner_phone, and owner_linkedin, only return contact details '
+            'that are explicitly attached to that person. If multiple owners or executives, '
+            'return the primary one. '
             'If a field is not clearly present, use null. '
             'Return ONLY JSON with keys: '
-            'owner_name, company_email, company_phone, services_offered, '
+            'owner_name, owner_email, owner_phone, owner_linkedin, '
+            'company_email, company_phone, services_offered, '
             'year_established, company_description, certifications, '
             'facebook_url, yelp_url, employee_count.\n\n'
             f'{evidence}'
@@ -949,6 +1639,12 @@ def _step_scrape_website(lead: dict, enriched: dict, meta: dict) -> float:
         result = {}
         if result_data.get('owner_name'):
             result['owner_name'] = str(result_data['owner_name']).strip()
+        if result_data.get('owner_email'):
+            result['owner_email'] = str(result_data['owner_email']).strip()
+        if result_data.get('owner_phone'):
+            result['owner_phone'] = str(result_data['owner_phone']).strip()
+        if result_data.get('owner_linkedin') and _looks_like_person_linkedin(result_data.get('owner_linkedin')):
+            result['owner_linkedin'] = str(result_data['owner_linkedin']).strip()
         if result_data.get('company_email'):
             result['company_email'] = str(result_data['company_email'])
         if result_data.get('company_phone'):
@@ -1121,8 +1817,12 @@ def _step_claude_failsafe(lead: dict, enriched: dict, meta: dict) -> float:
 _STEP_FN_NAMES = {
     'google_places':     '_step_google_places',
     'google_maps':       '_step_google_maps',
+    'domain_recovery':   '_step_domain_recovery',
+    'openmart_company':  '_step_openmart_company',
     'hunter':            '_step_hunter',
     'apollo':            '_step_apollo',
+    'owner_email_followup': '_step_owner_email_followup',
+    'sixtyfour':         '_step_sixtyfour',
     'fullenrich':        '_step_fullenrich',
     'scrape_website':    '_step_scrape_website',
     'scrape_reviews':    '_step_scrape_reviews',
@@ -1131,12 +1831,18 @@ _STEP_FN_NAMES = {
 }
 
 STAGE_1 = ['google_places', 'google_maps']
-STAGE_2 = ['scrape_website']
-STAGE_3 = ['apollo', 'hunter', 'fullenrich']
-STAGE_4 = ['scrape_reviews', 'company_fallback', 'claude_failsafe']
+STAGE_2 = ['domain_recovery']
+STAGE_3 = ['scrape_website']
+STAGE_4 = ['openmart_company', 'apollo', 'hunter']
+STAGE_5 = ['sixtyfour']
+STAGE_6 = ['owner_email_followup', 'fullenrich']
+STAGE_7 = ['scrape_reviews', 'company_fallback', 'claude_failsafe']
 
 # Backward compat alias so existing imports still work.
-STEPS = [(k, globals()[_STEP_FN_NAMES[k]]) for k in STAGE_1 + STAGE_2 + STAGE_3 + STAGE_4]
+STEPS = [
+    (k, globals()[_STEP_FN_NAMES[k]])
+    for k in STAGE_1 + STAGE_2 + STAGE_3 + STAGE_4 + STAGE_5 + STAGE_6 + STAGE_7
+]
 
 
 def _get_step_fn(step_key: str):
@@ -1178,12 +1884,14 @@ def _run_step(step_key, lead, enriched, meta, emit, company):
         dynamic_reason = meta.pop('__skip_reason', None)
         if not fields_filled and cost == 0.0:
             event_type = 'enrich_step_skip'
-            if _x402_insufficient and step_key in ('hunter', 'apollo'):
+            if _x402_insufficient and not _has_orthogonal_api_key() and step_key in ('hunter', 'apollo', 'sixtyfour'):
                 detail = 'Skipped — insufficient x402 balance'
             elif dynamic_reason:
                 detail = dynamic_reason
             else:
                 detail = STEP_SKIP_REASONS.get(step_key, 'Step ran but produced no new fields.')
+        elif not fields_filled:
+            detail = dynamic_reason or 'Step ran but produced no new fields.'
         emit({
             'type': event_type,
             'lead_id': lead.get('id'),
@@ -1212,7 +1920,7 @@ def _run_step(step_key, lead, enriched, meta, emit, company):
             'elapsed': round(elapsed, 1),
         })
         # Emit insufficient_funds only on the FIRST 402 (flag just flipped)
-        if _x402_insufficient and not was_insufficient:
+        if _x402_insufficient and not was_insufficient and not _has_orthogonal_api_key():
             balance = check_x402_balance()
             emit({
                 'type': 'insufficient_funds',
@@ -1221,8 +1929,8 @@ def _run_step(step_key, lead, enriched, meta, emit, company):
         return 0.0
 
 
-def _merge_stage3_result(enriched, meta, step_enriched, step_meta):
-    """Merge a Stage 3 subresult into the main dicts using source priority."""
+def _merge_stage4_result(enriched, meta, step_enriched, step_meta):
+    """Merge an owner-identity subresult into the main dicts using source priority."""
     for field, value in step_enriched.items():
         if _is_empty(value):
             continue
@@ -1239,11 +1947,14 @@ def _merge_stage3_result(enriched, meta, step_enriched, step_meta):
 
 def enrich_lead(lead_id: int, emit=None, wait_if_paused=None) -> dict:
     """
-    Run the enrichment waterfall in 4 stages:
+    Run the enrichment waterfall in 7 stages:
       Stage 1 (sequential): Google Places -> Google Maps URL
-      Stage 2 (sequential): Website scrape
-      Stage 3 (parallel):   Apollo | Hunter | FullEnrich
-      Stage 4 (sequential): Review scrape -> Company fallback -> Claude failsafe
+      Stage 2 (sequential): Domain recovery
+      Stage 3 (sequential): Website scrape
+      Stage 4 (parallel):   Apollo | Hunter
+      Stage 5 (sequential): Sixtyfour phone lookup
+      Stage 6 (sequential): FullEnrich fallback
+      Stage 7 (sequential): Review scrape -> Company fallback -> Claude failsafe
     Returns {'cost': float, 'sources': dict}.
     """
     if emit is None:
@@ -1267,19 +1978,24 @@ def enrich_lead(lead_id: int, emit=None, wait_if_paused=None) -> dict:
         _pause_check()
         total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
 
-    # Stage 2: company evidence (sequential so owner_name can feed Stage 3)
+    # Stage 2: recover missing website/domain before scrape and owner lookups
     for step_key in STAGE_2:
         _pause_check()
         total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
 
-    # Stage 3: owner contact (parallel, merged by source priority)
+    # Stage 3: company evidence (sequential so owner_name can feed Stage 4)
+    for step_key in STAGE_3:
+        _pause_check()
+        total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
+
+    # Stage 4: owner identity/contact (parallel, merged by source priority)
     _pause_check()
     from pipeline.config import ENRICH_PHASE2_CONCURRENCY
 
-    stage3_results = {}
+    stage4_results = {}
     merged_lead = {**lead, **enriched}
 
-    def run_stage3_step(step_key):
+    def run_stage4_step(step_key):
         step_enriched = {}
         step_meta = {}
         cost = _run_step(step_key, merged_lead, step_enriched, step_meta, emit, company)
@@ -1287,28 +2003,38 @@ def enrich_lead(lead_id: int, emit=None, wait_if_paused=None) -> dict:
 
     with ThreadPoolExecutor(max_workers=ENRICH_PHASE2_CONCURRENCY) as executor:
         futures = {
-            executor.submit(run_stage3_step, step_key): step_key
-            for step_key in STAGE_3
+            executor.submit(run_stage4_step, step_key): step_key
+            for step_key in STAGE_4
         }
         for future in as_completed(futures):
             try:
                 step_key, cost, step_enriched, step_meta = future.result()
-                stage3_results[step_key] = (cost, step_enriched, step_meta)
+                stage4_results[step_key] = (cost, step_enriched, step_meta)
             except Exception as exc:
                 _error_logger.error(
-                    'lead_id=%s company=%s stage3_future step=%s error=%s\n%s',
+                    'lead_id=%s company=%s stage4_future step=%s error=%s\n%s',
                     lead_id, company, futures[future], exc, traceback.format_exc(),
                 )
 
-    # Merge in strict priority order: Apollo first, then Hunter, then FullEnrich.
-    for step_key in STAGE_3:
-        if step_key in stage3_results:
-            cost, step_enriched, step_meta = stage3_results[step_key]
-            total_cost += cost
-            _merge_stage3_result(enriched, meta, step_enriched, step_meta)
-
-    # Stage 4: finalization (sequential)
+    # Merge in deterministic order; field-level priority decides replacements.
     for step_key in STAGE_4:
+        if step_key in stage4_results:
+            cost, step_enriched, step_meta = stage4_results[step_key]
+            total_cost += cost
+            _merge_stage4_result(enriched, meta, step_enriched, step_meta)
+
+    # Stage 5: owner phone provider (sequential)
+    for step_key in STAGE_5:
+        _pause_check()
+        total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
+
+    # Stage 6: final paid owner fallback (sequential)
+    for step_key in STAGE_6:
+        _pause_check()
+        total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
+
+    # Stage 7: finalization (sequential)
+    for step_key in STAGE_7:
         _pause_check()
         total_cost += _run_step(step_key, lead, enriched, meta, emit, company)
 

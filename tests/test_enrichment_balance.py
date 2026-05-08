@@ -62,30 +62,27 @@ def test_hunter_402_stops_all_future_paid_calls():
     mock_session = MagicMock()
     mock_session.get.return_value = mock_resp
 
-    # First call: Hunter gets 402, sets the flag
-    with patch.object(mod, '_x402_session', return_value=mock_session):
+    # Three consecutive x402 402s set the flag; Orthogonal is disabled here so
+    # this tests the x402 fallback path directly.
+    with patch('pipeline.orthogonal.has_api_key', return_value=False), \
+         patch.object(mod, '_x402_session', return_value=mock_session):
         lead = {'company': 'Test Co', 'website': 'https://test.com'}
-        try:
-            mod._step_hunter(lead, {}, {})
-        except RuntimeError:
-            pass
+        for _ in range(3):
+            try:
+                mod._step_hunter(lead, {}, {})
+            except RuntimeError:
+                pass
 
     assert mod._x402_insufficient is True
 
     # Second call: Hunter for a DIFFERENT lead should skip without making any API call
     lead2 = {'company': 'Other Co', 'website': 'https://other.com'}
-    try:
-        mod._step_hunter(lead2, {}, {})
-        assert False, 'Should have raised'
-    except RuntimeError as e:
-        assert 'skipped' in str(e).lower()
+    with patch('pipeline.orthogonal.has_api_key', return_value=False):
+        assert mod._step_hunter(lead2, {}, {}) == 0.0
 
     # Third call: Apollo should ALSO skip without making any API call
-    try:
-        mod._step_apollo(lead2, {}, {})
-        assert False, 'Should have raised'
-    except RuntimeError as e:
-        assert 'skipped' in str(e).lower()
+    with patch('pipeline.orthogonal.has_api_key', return_value=False):
+        assert mod._step_apollo(lead2, {}, {}) == 0.0
 
     mod._x402_insufficient = False
 
@@ -99,10 +96,8 @@ def test_hunter_skips_when_flag_set():
     enriched = {}
     meta = {}
     try:
-        mod._step_hunter(lead, enriched, meta)
-        assert False, 'Should have raised'
-    except RuntimeError as e:
-        assert 'skipped' in str(e).lower()
+        with patch('pipeline.orthogonal.has_api_key', return_value=False):
+            assert mod._step_hunter(lead, enriched, meta) == 0.0
     finally:
         mod._x402_insufficient = False
 
@@ -116,10 +111,8 @@ def test_apollo_skips_when_flag_set():
     enriched = {}
     meta = {}
     try:
-        mod._step_apollo(lead, enriched, meta)
-        assert False, 'Should have raised'
-    except RuntimeError as e:
-        assert 'skipped' in str(e).lower()
+        with patch('pipeline.orthogonal.has_api_key', return_value=False):
+            assert mod._step_apollo(lead, enriched, meta) == 0.0
     finally:
         mod._x402_insufficient = False
 

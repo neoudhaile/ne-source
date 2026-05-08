@@ -1,0 +1,588 @@
+{
+  "captured_at": "2026-05-08T05:05:01.151632+00:00",
+  "cleanup": {},
+  "csv": "/Users/neoudhaile/Desktop/simple tier/short.csv",
+  "error_message": null,
+  "event_counts": {
+    "enrich_step_done": 17,
+    "enrich_step_skip": 19,
+    "enrich_step_start": 36,
+    "insert": 3
+  },
+  "fields": {
+    "owner_email": {
+      "all_nonempty": 3,
+      "all_truthful": 3,
+      "kept_nonempty": 3,
+      "kept_truthful": 3,
+      "source_breakdown": {
+        "hunter": 3
+      }
+    },
+    "owner_name": {
+      "all_nonempty": 3,
+      "all_truthful": 3,
+      "kept_nonempty": 3,
+      "kept_truthful": 3,
+      "source_breakdown": {
+        "hunter": 3
+      }
+    },
+    "owner_phone": {
+      "all_nonempty": 2,
+      "all_truthful": 2,
+      "kept_nonempty": 2,
+      "kept_truthful": 2,
+      "source_breakdown": {
+        "empty": 1,
+        "sixtyfour": 2
+      }
+    }
+  },
+  "inserted_count": 3,
+  "kept_count": 3,
+  "label": "owner-contact-short-3-discovered-management-memory",
+  "lead_diagnostics": [
+    {
+      "city": "Downey",
+      "company": "Farwest Corrosion Control Company",
+      "lead_id": 1,
+      "missing_truthful": [],
+      "owner_fields": {
+        "owner_email": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "trankin@farwestcorrosion.com"
+        },
+        "owner_name": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "Troy Rankin"
+        },
+        "owner_phone": {
+          "source": "sixtyfour",
+          "truthful": true,
+          "value": "+14252908773"
+        }
+      },
+      "state": "CA",
+      "step_outcomes": [
+        {
+          "detail": null,
+          "elapsed": 0.9,
+          "field_sources": {
+            "address": "google_places",
+            "company": "google_places",
+            "company_phone": "google_places",
+            "google_maps_url": "google_places",
+            "google_place_id": "google_places",
+            "rating": "google_places",
+            "review_count": "google_places",
+            "website": "google_places"
+          },
+          "fields_filled": [
+            "company_phone",
+            "google_place_id",
+            "company",
+            "website",
+            "review_count",
+            "address",
+            "google_maps_url",
+            "rating"
+          ],
+          "step": "Google Places",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Lead already has a website, or no recovery providers configured.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Domain recovery",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No website available to scrape, or no scraper fallback is configured.",
+          "elapsed": 12.2,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Website scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Step ran but produced no new fields.",
+          "elapsed": 4.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 5.4,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 9.9,
+          "field_sources": {
+            "key_staff": "hunter",
+            "owner_email": "hunter",
+            "owner_linkedin": "hunter",
+            "owner_name": "hunter"
+          },
+          "fields_filled": [
+            "owner_linkedin",
+            "owner_email",
+            "key_staff",
+            "owner_name"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 15.5,
+          "field_sources": {
+            "owner_phone": "sixtyfour"
+          },
+          "fields_filled": [
+            "owner_phone"
+          ],
+          "step": "Sixtyfour",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No company email or phone available to reuse.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Company fallback",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 2.5,
+          "field_sources": {
+            "certifications": "claude_inferred",
+            "company_description": "claude_inferred",
+            "employee_count": "claude_inferred",
+            "review_summary": "claude_inferred",
+            "services_offered": "claude_inferred"
+          },
+          "fields_filled": [
+            "company_description",
+            "services_offered",
+            "certifications",
+            "review_summary",
+            "employee_count"
+          ],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "http://www.farwestcorrosion.com/",
+      "why_missing": {}
+    },
+    {
+      "city": "March Air Reserve Base",
+      "company": "Western Municipal Water District",
+      "lead_id": 2,
+      "missing_truthful": [],
+      "owner_fields": {
+        "owner_email": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "mmatlock@wmwd.com"
+        },
+        "owner_name": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "Melissa Matlock"
+        },
+        "owner_phone": {
+          "source": "sixtyfour",
+          "truthful": true,
+          "value": "+17143285613"
+        }
+      },
+      "state": "CA",
+      "step_outcomes": [
+        {
+          "detail": null,
+          "elapsed": 0.9,
+          "field_sources": {
+            "address": "google_places",
+            "company": "google_places",
+            "company_phone": "google_places",
+            "google_maps_url": "google_places",
+            "google_place_id": "google_places",
+            "rating": "google_places",
+            "review_count": "google_places",
+            "website": "google_places"
+          },
+          "fields_filled": [
+            "company_phone",
+            "google_place_id",
+            "company",
+            "website",
+            "review_count",
+            "address",
+            "google_maps_url",
+            "rating"
+          ],
+          "step": "Google Places",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Lead already has a website, or no recovery providers configured.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Domain recovery",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 8.0,
+          "field_sources": {
+            "company_description": "direct",
+            "owner_name": "direct",
+            "services_offered": "direct",
+            "year_established": "direct"
+          },
+          "fields_filled": [
+            "company_description",
+            "year_established",
+            "services_offered",
+            "owner_name"
+          ],
+          "step": "Website scrape",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 3.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 4.4,
+          "field_sources": {
+            "company_description": "apollo",
+            "company_phone": "apollo",
+            "employee_count": "apollo",
+            "owner_email": "apollo",
+            "owner_linkedin": "apollo",
+            "owner_name": "apollo",
+            "revenue_estimate": "apollo",
+            "services_offered": "apollo",
+            "year_established": "apollo"
+          },
+          "fields_filled": [
+            "owner_email",
+            "company_description",
+            "services_offered",
+            "company_phone",
+            "revenue_estimate",
+            "owner_name",
+            "owner_linkedin",
+            "employee_count",
+            "year_established"
+          ],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 12.6,
+          "field_sources": {
+            "key_staff": "hunter",
+            "owner_email": "hunter",
+            "owner_name": "hunter"
+          },
+          "fields_filled": [
+            "owner_email",
+            "key_staff",
+            "owner_name"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 19.7,
+          "field_sources": {
+            "owner_phone": "sixtyfour"
+          },
+          "fields_filled": [
+            "owner_phone"
+          ],
+          "step": "Sixtyfour",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No company email or phone available to reuse.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Company fallback",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 1.6,
+          "field_sources": {
+            "certifications": "claude_inferred",
+            "facebook_url": "claude_inferred",
+            "review_summary": "claude_inferred",
+            "yelp_url": "claude_inferred"
+          },
+          "fields_filled": [
+            "review_summary",
+            "yelp_url",
+            "facebook_url",
+            "certifications"
+          ],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "https://westernwaterca.gov/",
+      "why_missing": {}
+    },
+    {
+      "city": "Carson",
+      "company": "KWI",
+      "lead_id": 3,
+      "missing_truthful": [
+        "owner_phone"
+      ],
+      "owner_fields": {
+        "owner_email": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "judy.noe@kwinternational.com"
+        },
+        "owner_name": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "Judy Noe"
+        },
+        "owner_phone": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        }
+      },
+      "state": "CA",
+      "step_outcomes": [
+        {
+          "detail": "No company/address data available for place matching, or no place match found.",
+          "elapsed": 0.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Places",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 4.8,
+          "field_sources": {
+            "website": "openmart"
+          },
+          "fields_filled": [
+            "website"
+          ],
+          "step": "Domain recovery",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 9.1,
+          "field_sources": {
+            "certifications": "direct",
+            "company_description": "direct",
+            "company_email": "direct",
+            "company_phone": "direct",
+            "services_offered": "direct"
+          },
+          "fields_filled": [
+            "company_phone",
+            "services_offered",
+            "company_description",
+            "certifications",
+            "company_email"
+          ],
+          "step": "Website scrape",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 3.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Step ran but produced no new fields.",
+          "elapsed": 5.2,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 8.6,
+          "field_sources": {
+            "key_staff": "hunter",
+            "owner_email": "hunter",
+            "owner_name": "hunter"
+          },
+          "fields_filled": [
+            "owner_email",
+            "key_staff",
+            "owner_name"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Phone provider returned no phone",
+          "elapsed": 35.2,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Sixtyfour",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No company email or phone available to reuse.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Company fallback",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 1.4,
+          "field_sources": {
+            "employee_count": "claude_inferred",
+            "facebook_url": "claude_inferred",
+            "review_summary": "claude_inferred",
+            "yelp_url": "claude_inferred"
+          },
+          "fields_filled": [
+            "review_summary",
+            "yelp_url",
+            "facebook_url",
+            "employee_count"
+          ],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "https://www.kwinternational.com",
+      "why_missing": {
+        "owner_phone": "Apollo, Hunter.io, Sixtyfour ran but did not return owner_phone."
+      }
+    }
+  ],
+  "limit": 3,
+  "mapping": {
+    "Address": "address",
+    "Employees": "employee_count",
+    "Industry": "industry",
+    "LinkedIn": "company_linkedin",
+    "Name": "company",
+    "Revenue": "revenue_estimate",
+    "Year Founded": "year_established"
+  },
+  "mode": "memory",
+  "remaining_count": 3,
+  "run_id": "memory-20260508T050237Z",
+  "status": "completed"
+}

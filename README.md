@@ -11,7 +11,7 @@ Searches for niche service businesses in Southern California, classifies them by
 1. **Search** — query Openmart for SMBs across configured industries and cities.
 2. **Filter** — 3-layer geo filter (state → city → distance) drops leads outside Southern California.
 3. **Tier** — Claude classifies each lead as `tier_1`, `tier_2`, `tier_3`, or `hard_remove`. Hard-removes are deleted before any paid API calls.
-4. **Enrich** — 9-step waterfall fills owner identity, contact info, and company evidence from 6+ providers.
+4. **Enrich** — multi-source waterfall fills owner/senior decision-maker identity, owner contact info, and company evidence.
 5. **Re-tier** — Claude re-classifies each lead with the enriched data.
 6. **Export** — push the final lead set to a Notion database for the operator to review.
 
@@ -36,13 +36,13 @@ CSV uploads follow the same path from step 3 onward.
 ┌──────┴───────────────────────────────────────────────────────┐
 │  Pipeline (pipeline/)                                         │
 │                                                               │
-│   Search ──► Geo Filter ──► Tier ──► Enrich (9 steps)         │
+│   Search ──► Geo Filter ──► Tier ──► Enrich (multi-source)    │
 │                                          │                    │
 │                                          ▼                    │
 │                                       Re-tier ──► Notion      │
 │                                                               │
 │  Concurrency: ENRICH_CONCURRENCY=3, ENRICH_PHASE2_CONCURRENCY=3│
-│  Payment:     x402 (USDC on Base) for Hunter / Apollo / etc.  │
+│  Payment:     Orthogonal credits first, x402 fallback          │
 └──────┬───────────────────────────────────────────────────────┘
        │ psycopg2
 ┌──────┴───────────────────────────────────────────────────────┐
@@ -62,14 +62,14 @@ CSV uploads follow the same path from step 3 onward.
 | Frontend    | React 19, TypeScript, Vite, ReactFlow                      |
 | Database    | PostgreSQL 15 (Dockerized on a DigitalOcean droplet)       |
 | AI          | Anthropic Claude (Haiku 4.5)                               |
-| Payment     | x402 protocol (USDC on Base) via Orthogonal proxy          |
+| Payment     | Orthogonal Run API first, x402 protocol fallback              |
 | Hosting     | VPS for backend + DB; Vercel planned for frontend          |
 
 ---
 
 ## API integrations
 
-Every external service is invoked from `pipeline/`. APIs marked **x402** are paid per call in USDC via the Orthogonal proxy (`https://x402.orth.sh`) — the wallet at `0x254f9eeba6EC17B26Ded62E44D81BD9F160eFBC1` funds them.
+Every external service is invoked from `pipeline/`. Paid data providers now route through the Orthogonal Run API first, with x402 retained as fallback during the migration.
 
 ### 1. Openmart — Lead search (`pipeline/scraper.py`)
 - **What it does:** returns SMBs matching an industry + city query.
@@ -90,20 +90,20 @@ Every external service is invoked from `pipeline/`. APIs marked **x402** are pai
 - **How it works:** direct REST calls to Google Places API v1 with `GOOGLE_MAPS_API_KEY`. Place ID is then used to construct a free `google_maps_url`.
 - **When it runs:** step 2 of the enrichment waterfall.
 
-### 4. Hunter.io — Email lookup *(x402)*
-- **What it does:** find professional emails by domain.
-- **How it works:** routed through Orthogonal x402 proxy, $0.01 per call. Requires a verified `website` to be useful — short-circuits when `website` is empty.
-- **When it runs:** step 4 of the waterfall (Phase 2, parallel with Apollo + Firecrawl).
+### 4. Hunter.io — Email lookup
+- **What it does:** find professional emails and owner/senior contacts by domain.
+- **How it works:** routed through Orthogonal Run API first, x402 fallback second. Requires a verified `website`/domain to be useful.
+- **When it runs:** owner-contact stage, parallel with Apollo and Openmart company enrichment.
 
-### 5. Apollo — People + company match *(x402)*
-- **What it does:** match an `owner_name` (or LinkedIn URL) to contact info, phone, employee count, and key staff.
-- **How it works:** routed through Orthogonal x402 proxy, $0.01 per call. Sends `name`, `domain`, `email`, plus `organization_linkedin_url` when available.
-- **When it runs:** step 5 of the waterfall.
+### 5. Apollo — People + company match
+- **What it does:** match a person/company to contact info and organization fields; can also search for senior decision makers.
+- **How it works:** routed through Orthogonal Run API first, x402 fallback second. Sends name/domain/email/company LinkedIn when available.
+- **When it runs:** owner-contact stage, parallel with Hunter and Openmart company enrichment.
 
-### 6. Firecrawl — Website + reviews scrape (`pipeline/firecrawl_client.py`)
-- **What it does:** scrapes the company's homepage and review pages for services, description, certifications, and review sentiment.
-- **How it works:** direct API with `FIRECRAWL_API_KEY`. Falls back to a direct HTTP fetch + Zyte proxy when configured. Markdown output is then parsed with Claude for structured extraction.
-- **When it runs:** step 6 (website) and step 7 (reviews).
+### 6. Website scrape (`pipeline/firecrawl_client.py`)
+- **What it does:** scrapes homepage/contact/about/team/leadership pages for owner names, company email/phone, services, description, certifications, and other company evidence.
+- **How it works:** direct HTTP fetch with Zyte fallback when configured. Page text is parsed with Claude for structured extraction.
+- **When it runs:** after Google Places/domain recovery, before paid owner-contact providers.
 
 ### 7. FullEnrich — Final paid fallback (`pipeline/fullenrich.py`)
 - **What it does:** identity + contact enrichment as a last-resort paid provider.
@@ -115,9 +115,9 @@ Every external service is invoked from `pipeline/`. APIs marked **x402** are pai
 - **How it works:** direct Notion API with a workspace token. Each lead becomes a row with the full enrichment payload.
 - **When it runs:** terminal step of `run_pipeline` and `run_csv_pipeline`.
 
-### 9. x402 / Orthogonal — Payment fabric
-- **What it does:** funds all paid SMB-data APIs (Openmart, Hunter, Apollo) with per-call USDC micropayments on Base.
-- **How it works:** every paid request hits `https://x402.orth.sh/<skill>`. The first response is HTTP 402 with payment terms; the client signs a payment intent with the wallet's private key and retries. The Python `x402` SDK's `x402_http_adapter` is mounted on a `requests.Session` to make this transparent.
+### 9. Orthogonal / x402 — Payment fabric
+- **What it does:** funds paid SMB-data APIs such as Openmart, Hunter, Apollo, and Sixtyfour.
+- **How it works:** `pipeline/orthogonal.py` calls `https://api.orthogonal.com/v1/run` when `ORTHOGONAL_API_KEY` is configured. x402 routes remain as fallback for compatible providers.
 - **Safety nets:**
   - **Pre-flight balance check** before enrichment; auto-pauses the run if the wallet can't cover the estimated cost.
   - **Mid-run 402 handling** — after 3 consecutive 402s on a step, that step silently skips the rest of the run instead of throwing.
@@ -125,24 +125,20 @@ Every external service is invoked from `pipeline/`. APIs marked **x402** are pai
 
 ---
 
-## Enrichment waterfall (9 steps, 3 phases)
+## Enrichment waterfall
 
 Each step only fills empty fields. Source attribution is recorded per-field in `enrichment_meta` (JSONB).
 
-**Phase 1 — sequential (cheap context):**
-1. **Claude discovery** — infer `website` / `owner_name` from name + location.
-2. **Google Places** — bootstrap `website`, `phone`, `rating`, `review_count`, `google_maps_url`.
-3. **Google Maps URL** — construct from `place_id` (free).
+Current shape:
 
-**Phase 2 — parallel (paid lookups, `ENRICH_PHASE2_CONCURRENCY=3`):**
-4. **Hunter** — domain → email.
-5. **Apollo** — name + domain → contact + employee count.
-6. **Firecrawl website** — scrape homepage for services / description.
-
-**Phase 3 — sequential (cleanup):**
-7. **Firecrawl reviews** — scrape review pages for sentiment summary.
-8. **Company fallback** — copy company contact into owner fields where appropriate (currently `owner_email` only — `owner_phone` is **not** filled here, to avoid silently promoting business phones to owner phones).
-9. **Claude failsafe** — infer remaining empty fields from all known evidence.
+1. **Google Places + Maps URL** — bootstrap website, company phone, rating, review count, and maps URL.
+2. **Domain recovery** — recover verified websites when source data lacks a domain.
+3. **Website scrape** — extract company evidence and explicit owner/senior decision-maker names from linked pages.
+4. **Openmart / Apollo / Hunter** — parallel owner/contact and company enrichment.
+5. **Sixtyfour** — owner phone and senior decision-maker fallback.
+6. **FullEnrich** — final paid fallback when configured.
+7. **Company fallback** — copies company email to `owner_email` only when no owner email exists; `owner_phone` is never filled from company phone.
+8. **Claude failsafe** — infer remaining non-contact fields only.
 
 ---
 
@@ -204,7 +200,7 @@ For deeper internals, infrastructure details, and the full file-by-file map, see
 | React UI (local)           | ✅ Complete                              |
 | CSV import                 | ✅ Complete                              |
 | Tiering (pre + post)       | ✅ Complete                              |
-| 9-step enrichment          | ✅ Complete                              |
+| Multi-source enrichment    | ✅ Complete, owner-contact tuning active |
 | Notion export              | ✅ Complete                              |
 | Owner-contact maximization | 🚧 In progress (`docs/superpowers/`)    |
 | Auth                       | 📋 Planned                               |

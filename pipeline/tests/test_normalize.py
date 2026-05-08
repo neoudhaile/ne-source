@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from pipeline.scraper import search_businesses
 from pipeline.normalize import normalize_lead
 
-results = search_businesses(
+results, _next_cursor = search_businesses(
     query='HVAC repair',
     city='Los Angeles, CA',
     page_size=10,

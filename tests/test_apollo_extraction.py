@@ -30,13 +30,13 @@ APOLLO_RESPONSE = {
 def _run_apollo_with_response(lead, response_json):
     import pipeline.enrichment as mod
     mod.reset_x402_flag()
-    with patch.object(mod, '_x402_session') as mock_session_fn:
-        session = MagicMock()
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.json.return_value = response_json
-        session.post.return_value = resp
-        mock_session_fn.return_value = session
+    session = MagicMock()
+
+    def fake_provider_post(api, path, *, body=None, timeout=None):
+        session.post(api, path, json=body or {}, timeout=timeout)
+        return response_json
+
+    with patch.object(mod, '_provider_post_json', side_effect=fake_provider_post):
         enriched = {}
         meta = {}
         cost = mod._step_apollo(lead, enriched, meta)

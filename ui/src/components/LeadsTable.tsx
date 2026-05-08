@@ -45,8 +45,11 @@ const FIELD_LABELS: Record<string, string> = {
 
 const SOURCE_BADGES: Record<string, { label: string; color: string }> = {
   google_places: { label: 'Places', color: 'bg-emerald-800/60 text-emerald-300' },
+  domain_recovery: { label: 'Domain', color: 'bg-teal-800/60 text-teal-300' },
+  openmart: { label: 'Openmart', color: 'bg-rose-800/60 text-rose-200' },
   hunter: { label: 'Hunter', color: 'bg-green-800/60 text-green-300' },
   apollo: { label: 'Apollo', color: 'bg-blue-800/60 text-blue-300' },
+  sixtyfour: { label: 'Sixtyfour', color: 'bg-indigo-800/60 text-indigo-300' },
   fullenrich: { label: 'FullEnrich', color: 'bg-fuchsia-800/60 text-fuchsia-300' },
   scrape: { label: 'Scrape', color: 'bg-orange-800/60 text-orange-300' },
   direct: { label: 'Direct', color: 'bg-orange-800/60 text-orange-300' },
@@ -62,6 +65,8 @@ const SOURCE_BADGES: Record<string, { label: string; color: string }> = {
 const STEP_FIELDS: Record<string, string[]> = {
   'Google Places': ['google_maps_url'],
   'Google Maps URL': ['google_maps_url'],
+  'Domain recovery': ['google_maps_url'],
+  'Openmart company enrich': ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin', 'key_staff'],
   'Hunter.io': ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin', 'key_staff'],
   'Apollo': ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin', 'employee_count', 'key_staff', 'year_established', 'revenue_estimate', 'company_description', 'facebook_url', 'services_offered'],
   'FullEnrich': ['owner_name', 'owner_email', 'owner_phone', 'owner_linkedin'],
@@ -94,8 +99,11 @@ function emptyRow(id: number, company: string, city: string, industry: string): 
 
 function sourceFromStep(step: string): string {
   if (step.includes('Google Places')) return 'google_places'
+  if (step.includes('Domain recovery')) return 'domain_recovery'
+  if (step.includes('Openmart')) return 'openmart'
   if (step.includes('Hunter')) return 'hunter'
   if (step.includes('Apollo')) return 'apollo'
+  if (step.includes('Sixtyfour')) return 'sixtyfour'
   if (step.includes('FullEnrich')) return 'fullenrich'
   if (step.includes('Website scrape')) return 'scrape'
   if (step.includes('Review scrape')) return 'scrape'

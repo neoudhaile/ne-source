@@ -65,6 +65,72 @@ def test_lead_to_notion_properties_maps_unknown_industry_to_other():
     assert props['Industry']['select']['name'] == 'Other'
 
 
+def test_lead_to_notion_properties_company_contact_split():
+    lead = {
+        'company': 'Acme',
+        'owner_email': 'owner@acme.com',
+        'owner_phone': '555-0001',
+        'company_email': 'info@acme.com',
+        'company_phone': '555-9999',
+    }
+    props = mod._lead_to_notion_properties(lead)
+    assert props['Owner Email']['email'] == 'owner@acme.com'
+    assert props['Owner Phone']['phone_number'] == '555-0001'
+    assert props['Company Email']['email'] == 'info@acme.com'
+    assert props['Company Phone']['phone_number'] == '555-9999'
+
+
+def test_lead_to_notion_properties_owner_sources_from_meta_dict():
+    lead = {
+        'company': 'Acme',
+        'owner_name': 'Jane',
+        'owner_email': 'jane@acme.com',
+        'owner_phone': '555-0001',
+        'enrichment_meta': {
+            'owner_name': {'source': 'hunter', 'provider': 'hunter'},
+            'owner_email': {'source': 'hunter'},
+            'owner_phone': {'provider': 'sixtyfour'},
+        },
+    }
+    props = mod._lead_to_notion_properties(lead)
+    text = props['Owner Sources']['rich_text'][0]['text']['content']
+    assert 'name: hunter' in text
+    assert 'email: hunter' in text
+    assert 'phone: sixtyfour' in text
+
+
+def test_lead_to_notion_properties_owner_sources_from_meta_json_string():
+    import json as _json
+    lead = {
+        'company': 'Acme',
+        'owner_email': 'jane@acme.com',
+        'enrichment_meta': _json.dumps({'owner_email': {'source': 'hunter'}}),
+    }
+    props = mod._lead_to_notion_properties(lead)
+    assert 'email: hunter' in props['Owner Sources']['rich_text'][0]['text']['content']
+
+
+def test_lead_to_notion_properties_notes_flag_company_fallback_email():
+    lead = {
+        'company': 'Acme',
+        'owner_name': 'Jane',
+        'owner_email': 'info@acme.com',
+        'owner_phone': '555-0001',
+        'enrichment_meta': {'owner_email': {'source': 'company_fallback', 'fallback': True}},
+    }
+    props = mod._lead_to_notion_properties(lead)
+    notes = props['Notes']['rich_text'][0]['text']['content']
+    assert 'company_fallback' in notes
+
+
+def test_lead_to_notion_properties_notes_flag_missing_owner_contact():
+    lead = {'company': 'Acme', 'owner_name': 'Jane'}
+    props = mod._lead_to_notion_properties(lead)
+    notes = props['Notes']['rich_text'][0]['text']['content']
+    assert 'owner_email missing' in notes
+    assert 'owner_phone missing' in notes
+
+
 def test_lead_to_notion_properties_minimal():
     lead = {'company': 'Test Corp'}
 

@@ -34,19 +34,8 @@ HUNTER_RESPONSE_NO_EXECS = {
 def _run_hunter_with_response(lead, response_json):
     import pipeline.enrichment as mod
     mod.reset_x402_flag()
-    with patch.object(mod, '_x402_session') as mock_session_fn:
-        session = MagicMock()
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.raise_for_status = MagicMock()
-        resp.json.return_value = response_json
-        # email-finder follow-up returns no data so we isolate domain-search
-        finder_resp = MagicMock()
-        finder_resp.status_code = 200
-        finder_resp.raise_for_status = MagicMock()
-        finder_resp.json.return_value = {'data': {}}
-        session.get.side_effect = [resp, finder_resp, finder_resp, finder_resp]
-        mock_session_fn.return_value = session
+    # email-finder follow-up returns no data so we isolate domain-search
+    with patch.object(mod, '_provider_get_json', side_effect=[response_json, {'data': {}}, {'data': {}}, {'data': {}}]):
         enriched = {}
         meta = {}
         cost = mod._step_hunter(lead, enriched, meta)

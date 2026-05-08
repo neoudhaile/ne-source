@@ -268,7 +268,19 @@ def _parse_full_address(value: str) -> dict:
         return {'address': value.strip()}
 
     parsed = {'address': parts[0]}
-    parsed.update(_parse_city_state_zip(', '.join(parts[1:3])))
+
+    city = parts[1] if len(parts) > 1 else ''
+    state = parts[2] if len(parts) > 2 else ''
+    zipcode = None
+    for part in reversed(parts[2:]):
+        match = re.search(r'\b(\d{5}(?:-\d{4})?)\b', part)
+        if match:
+            zipcode = match.group(1)
+            break
+
+    parsed.update(_parse_city_state_zip(', '.join(p for p in (city, state) if p)))
+    if zipcode and not parsed.get('zipcode'):
+        parsed['zipcode'] = zipcode
     return parsed
 
 

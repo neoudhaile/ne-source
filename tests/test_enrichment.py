@@ -4,6 +4,16 @@ import time
 from unittest.mock import patch, MagicMock
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _disable_unrelated_late_paid_steps(monkeypatch):
+    import pipeline.enrichment as mod
+
+    monkeypatch.setattr(mod, '_step_sixtyfour', lambda l, e, m: 0.0)
+    monkeypatch.setattr(mod, '_step_fullenrich', lambda l, e, m: 0.0)
+
 
 def test_x402_session_reuse_same_thread():
     """Same thread should get the same session object back."""
@@ -89,8 +99,11 @@ def test_step_registry_allows_patching():
     with patch.object(mod, '_step_hunter', fake_hunter), \
          patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_domain_recovery', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_openmart_company', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_apollo', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_website', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_owner_email_followup', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_reviews', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_company_contact_fallback', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_claude_failsafe', lambda l, e, m: 0.0), \
@@ -104,7 +117,7 @@ def test_step_registry_allows_patching():
 
 
 def test_all_steps_execute_in_order():
-    """All 9 steps should execute in the correct sequential order."""
+    """All enrichment stages should execute in the expected overall order."""
     import pipeline.enrichment as mod
 
     executed_steps = []
@@ -117,9 +130,12 @@ def test_all_steps_execute_in_order():
 
     with patch.object(mod, '_step_google_places', make_step('google_places')), \
          patch.object(mod, '_step_google_maps', make_step('google_maps')), \
+         patch.object(mod, '_step_domain_recovery', make_step('domain_recovery')), \
+         patch.object(mod, '_step_openmart_company', make_step('openmart_company')), \
          patch.object(mod, '_step_hunter', make_step('hunter')), \
          patch.object(mod, '_step_apollo', make_step('apollo')), \
          patch.object(mod, '_step_scrape_website', make_step('scrape_website')), \
+         patch.object(mod, '_step_owner_email_followup', make_step('owner_email_followup')), \
          patch.object(mod, '_step_scrape_reviews', make_step('scrape_reviews')), \
          patch.object(mod, '_step_company_contact_fallback', make_step('company_fallback')), \
          patch.object(mod, '_step_claude_failsafe', make_step('claude_failsafe')), \
@@ -128,16 +144,22 @@ def test_all_steps_execute_in_order():
 
         mod.enrich_lead(1)
 
-    expected = [
-        'google_places', 'google_maps',
-        'hunter', 'apollo', 'scrape_website',
-        'scrape_reviews', 'company_fallback', 'claude_failsafe',
-    ]
-    assert executed_steps == expected, f"Steps out of order: {executed_steps}"
+    assert executed_steps.index('google_places') < executed_steps.index('domain_recovery')
+    assert executed_steps.index('google_maps') < executed_steps.index('domain_recovery')
+    assert executed_steps.index('domain_recovery') < executed_steps.index('scrape_website')
+    assert executed_steps.index('scrape_website') < executed_steps.index('openmart_company')
+    assert executed_steps.index('scrape_website') < executed_steps.index('apollo')
+    assert executed_steps.index('scrape_website') < executed_steps.index('hunter')
+    assert executed_steps.index('openmart_company') < executed_steps.index('scrape_reviews')
+    assert executed_steps.index('apollo') < executed_steps.index('scrape_reviews')
+    assert executed_steps.index('hunter') < executed_steps.index('scrape_reviews')
+    assert executed_steps.index('owner_email_followup') < executed_steps.index('scrape_reviews')
+    assert executed_steps.index('scrape_reviews') < executed_steps.index('company_fallback')
+    assert executed_steps.index('company_fallback') < executed_steps.index('claude_failsafe')
 
 
 def test_phase2_runs_parallel():
-    """Phase 2 steps (hunter, apollo, scrape_website) should overlap in time."""
+    """Owner-contact steps should overlap in time."""
     import pipeline.enrichment as mod
 
     call_times = {}
@@ -154,9 +176,12 @@ def test_phase2_runs_parallel():
 
     with patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_domain_recovery', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_openmart_company', make_slow_step('openmart_company')), \
          patch.object(mod, '_step_hunter', make_slow_step('hunter')), \
          patch.object(mod, '_step_apollo', make_slow_step('apollo')), \
-         patch.object(mod, '_step_scrape_website', make_slow_step('scrape_website')), \
+         patch.object(mod, '_step_scrape_website', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_owner_email_followup', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_reviews', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_company_contact_fallback', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_claude_failsafe', lambda l, e, m: 0.0), \
@@ -165,14 +190,14 @@ def test_phase2_runs_parallel():
 
         result = mod.enrich_lead(1)
 
-    assert set(call_times.keys()) == {'hunter', 'apollo', 'scrape_website'}
+    assert set(call_times.keys()) == {'openmart_company', 'hunter', 'apollo'}
 
-    starts = [call_times[k]['start'] for k in ['hunter', 'apollo', 'scrape_website']]
+    starts = [call_times[k]['start'] for k in ['openmart_company', 'hunter', 'apollo']]
     max_gap = max(starts) - min(starts)
     assert max_gap < 0.15, f"Phase 2 steps should start near-simultaneously, gap was {max_gap:.3f}s"
 
     earliest_start = min(starts)
-    latest_end = max(call_times[k]['end'] for k in ['hunter', 'apollo', 'scrape_website'])
+    latest_end = max(call_times[k]['end'] for k in ['openmart_company', 'hunter', 'apollo'])
     wall_time = latest_end - earliest_start
     assert wall_time < 0.6, f"Phase 2 wall time should be ~0.3s parallel, was {wall_time:.3f}s"
 
@@ -195,9 +220,12 @@ def test_phase2_merge_order_deterministic():
 
     with patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_domain_recovery', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_openmart_company', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_hunter', hunter_email), \
          patch.object(mod, '_step_apollo', apollo_email), \
          patch.object(mod, '_step_scrape_website', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_owner_email_followup', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_reviews', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_company_contact_fallback', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_claude_failsafe', lambda l, e, m: 0.0), \
@@ -223,9 +251,12 @@ def test_phase2_error_isolation():
 
     with patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_domain_recovery', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_openmart_company', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_hunter', failing_hunter), \
          patch.object(mod, '_step_apollo', working_apollo), \
          patch.object(mod, '_step_scrape_website', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_owner_email_followup', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_reviews', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_company_contact_fallback', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_claude_failsafe', lambda l, e, m: 0.0), \
@@ -261,9 +292,12 @@ def test_phase1_runs_before_phase2():
 
     with patch.object(mod, '_step_google_places', phase1_step('google_places')), \
          patch.object(mod, '_step_google_maps', phase1_step('google_maps')), \
+         patch.object(mod, '_step_domain_recovery', phase1_step('domain_recovery')), \
+         patch.object(mod, '_step_openmart_company', phase2_step('openmart_company')), \
          patch.object(mod, '_step_hunter', phase2_step('hunter')), \
          patch.object(mod, '_step_apollo', phase2_step('apollo')), \
          patch.object(mod, '_step_scrape_website', phase2_step('scrape_website')), \
+         patch.object(mod, '_step_owner_email_followup', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_reviews', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_company_contact_fallback', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_claude_failsafe', lambda l, e, m: 0.0), \
@@ -291,9 +325,12 @@ def test_batch_enrichment_faster_than_sequential():
 
     with patch.object(mod, '_step_google_places', make_slow_step('places')), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_domain_recovery', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_openmart_company', make_slow_step('openmart')), \
          patch.object(mod, '_step_hunter', make_slow_step('hunter')), \
          patch.object(mod, '_step_apollo', make_slow_step('apollo')), \
          patch.object(mod, '_step_scrape_website', make_slow_step('scrape')), \
+         patch.object(mod, '_step_owner_email_followup', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_reviews', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_company_contact_fallback', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_claude_failsafe', lambda l, e, m: 0.0), \
@@ -331,9 +368,12 @@ def test_batch_enrichment_data_integrity():
 
     with patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_domain_recovery', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_openmart_company', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_hunter', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_apollo', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_website', lead_specific_step), \
+         patch.object(mod, '_step_owner_email_followup', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_reviews', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_company_contact_fallback', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_claude_failsafe', lambda l, e, m: 0.0), \
@@ -361,9 +401,12 @@ def test_emit_events_fire_for_all_steps():
 
     with patch.object(mod, '_step_google_places', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_google_maps', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_domain_recovery', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_openmart_company', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_hunter', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_apollo', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_website', lambda l, e, m: 0.0), \
+         patch.object(mod, '_step_owner_email_followup', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_scrape_reviews', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_company_contact_fallback', lambda l, e, m: 0.0), \
          patch.object(mod, '_step_claude_failsafe', lambda l, e, m: 0.0), \
@@ -372,8 +415,8 @@ def test_emit_events_fire_for_all_steps():
 
         mod.enrich_lead(1, emit=capture_emit)
 
-    # 8 steps x 2 events each (start + done/skip) = 16 events
+    # 13 steps x 2 events each (start + done/skip) = 26 events
     start_events = [e for e in events if e['type'] == 'enrich_step_start']
     end_events = [e for e in events if e['type'] in ('enrich_step_done', 'enrich_step_skip', 'enrich_step_error')]
-    assert len(start_events) == 8, f"Expected 8 start events, got {len(start_events)}"
-    assert len(end_events) == 8, f"Expected 8 end events, got {len(end_events)}"
+    assert len(start_events) == 13, f"Expected 13 start events, got {len(start_events)}"
+    assert len(end_events) == 13, f"Expected 13 end events, got {len(end_events)}"

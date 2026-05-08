@@ -1,0 +1,1865 @@
+{
+  "captured_at": "2026-05-08T14:52:09.576274+00:00",
+  "cleanup": {},
+  "csv": "/Users/neoudhaile/Desktop/simple tier/Wholesale_Distribution_short.csv",
+  "error_message": null,
+  "event_counts": {
+    "enrich_step_done": 49,
+    "enrich_step_error": 11,
+    "enrich_step_skip": 70,
+    "enrich_step_start": 130,
+    "insert": 10
+  },
+  "fields": {
+    "owner_email": {
+      "all_nonempty": 10,
+      "all_truthful": 7,
+      "kept_nonempty": 10,
+      "kept_truthful": 7,
+      "source_breakdown": {
+        "company_fallback": 3,
+        "hunter": 7
+      }
+    },
+    "owner_name": {
+      "all_nonempty": 7,
+      "all_truthful": 7,
+      "kept_nonempty": 7,
+      "kept_truthful": 7,
+      "source_breakdown": {
+        "empty": 3,
+        "hunter": 6,
+        "scrape": 1
+      }
+    },
+    "owner_phone": {
+      "all_nonempty": 3,
+      "all_truthful": 3,
+      "kept_nonempty": 3,
+      "kept_truthful": 3,
+      "source_breakdown": {
+        "empty": 7,
+        "sixtyfour": 3
+      }
+    }
+  },
+  "inserted_count": 10,
+  "kept_count": 10,
+  "label": "owner-contact-wholesale-short-10-memory",
+  "lead_diagnostics": [
+    {
+      "city": "Irvine",
+      "company": "Coast to Coast Business Equipment",
+      "lead_id": 1,
+      "missing_truthful": [
+        "owner_email"
+      ],
+      "owner_fields": {
+        "owner_email": {
+          "source": "company_fallback",
+          "truthful": false,
+          "value": "coast2coast@ctcbe.com"
+        },
+        "owner_name": {
+          "source": "scrape",
+          "truthful": true,
+          "value": "Paul M. Faus"
+        },
+        "owner_phone": {
+          "source": "sixtyfour",
+          "truthful": true,
+          "value": "+16187199749"
+        }
+      },
+      "state": "California",
+      "step_outcomes": [
+        {
+          "detail": null,
+          "elapsed": 0.6,
+          "field_sources": {
+            "address": "google_places",
+            "company": "google_places",
+            "company_phone": "google_places",
+            "google_maps_url": "google_places",
+            "google_place_id": "google_places",
+            "rating": "google_places",
+            "review_count": "google_places",
+            "website": "google_places"
+          },
+          "fields_filled": [
+            "company_phone",
+            "google_maps_url",
+            "google_place_id",
+            "company",
+            "website",
+            "address",
+            "review_count",
+            "rating"
+          ],
+          "step": "Google Places",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Lead already has a website, or no recovery providers configured.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Domain recovery",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 12.4,
+          "field_sources": {
+            "company_description": "direct",
+            "company_email": "direct",
+            "employee_count": "direct",
+            "owner_name": "direct",
+            "services_offered": "direct",
+            "year_established": "direct"
+          },
+          "fields_filled": [
+            "employee_count",
+            "services_offered",
+            "company_email",
+            "company_description",
+            "owner_name",
+            "year_established"
+          ],
+          "step": "Website scrape",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 5.2,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 6.1,
+          "field_sources": {
+            "owner_linkedin": "apollo",
+            "owner_name": "apollo"
+          },
+          "fields_filled": [
+            "owner_linkedin",
+            "owner_name"
+          ],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 15.8,
+          "field_sources": {
+            "key_staff": "hunter"
+          },
+          "fields_filled": [
+            "key_staff"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 12.6,
+          "field_sources": {
+            "owner_phone": "sixtyfour"
+          },
+          "fields_filled": [
+            "owner_phone"
+          ],
+          "step": "Sixtyfour",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Owner email follow-up ran but returned no owner-specific email",
+          "elapsed": 26.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Owner email follow-up",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 0.0,
+          "field_sources": {
+            "owner_email": "company_fallback"
+          },
+          "fields_filled": [
+            "owner_email"
+          ],
+          "step": "Company fallback",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 0.8,
+          "field_sources": {
+            "review_summary": "claude_inferred"
+          },
+          "fields_filled": [
+            "review_summary"
+          ],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "http://www.ctcbe.com/",
+      "why_missing": {
+        "owner_email": "owner_email exists but source 'company_fallback' is not counted as truthful owner contact."
+      }
+    },
+    {
+      "city": "Gardena",
+      "company": "Electronic Entry Distributors",
+      "lead_id": 2,
+      "missing_truthful": [],
+      "owner_fields": {
+        "owner_email": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "jallen@electronicentrydistributors.com"
+        },
+        "owner_name": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "John Allen"
+        },
+        "owner_phone": {
+          "source": "sixtyfour",
+          "truthful": true,
+          "value": "+19722072939"
+        }
+      },
+      "state": "California",
+      "step_outcomes": [
+        {
+          "detail": null,
+          "elapsed": 0.6,
+          "field_sources": {
+            "address": "google_places",
+            "company": "google_places",
+            "company_phone": "google_places",
+            "google_maps_url": "google_places",
+            "google_place_id": "google_places",
+            "rating": "google_places",
+            "review_count": "google_places",
+            "website": "google_places"
+          },
+          "fields_filled": [
+            "company_phone",
+            "google_maps_url",
+            "google_place_id",
+            "company",
+            "website",
+            "address",
+            "review_count",
+            "rating"
+          ],
+          "step": "Google Places",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Lead already has a website, or no recovery providers configured.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Domain recovery",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 8.5,
+          "field_sources": {
+            "certifications": "direct",
+            "company_description": "direct",
+            "company_email": "direct",
+            "facebook_url": "direct",
+            "services_offered": "direct",
+            "year_established": "direct"
+          },
+          "fields_filled": [
+            "services_offered",
+            "company_email",
+            "company_description",
+            "certifications",
+            "facebook_url",
+            "year_established"
+          ],
+          "step": "Website scrape",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 3.8,
+          "field_sources": {
+            "company_description": "apollo",
+            "company_phone": "apollo",
+            "employee_count": "apollo",
+            "facebook_url": "apollo",
+            "services_offered": "apollo",
+            "year_established": "apollo"
+          },
+          "fields_filled": [
+            "employee_count",
+            "company_phone",
+            "services_offered",
+            "facebook_url",
+            "company_description",
+            "year_established"
+          ],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 4.7,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 5.6,
+          "field_sources": {
+            "key_staff": "hunter",
+            "owner_email": "hunter",
+            "owner_linkedin": "hunter",
+            "owner_name": "hunter"
+          },
+          "fields_filled": [
+            "owner_linkedin",
+            "owner_email",
+            "owner_name",
+            "key_staff"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 12.7,
+          "field_sources": {
+            "owner_phone": "sixtyfour"
+          },
+          "fields_filled": [
+            "owner_phone"
+          ],
+          "step": "Sixtyfour",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Owner email follow-up skipped \u2014 truthful owner_email already filled",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Owner email follow-up",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No company email or phone available to reuse.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Company fallback",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Only low-value fields remained (review_summary, yelp_url); skipped to save tokens.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Claude failsafe",
+          "type": "enrich_step_skip"
+        }
+      ],
+      "tier": null,
+      "website": "https://electronicentrydistributors.com/",
+      "why_missing": {}
+    },
+    {
+      "city": "Santa Fe Springs",
+      "company": "Pacific Mechanical Supply",
+      "lead_id": 3,
+      "missing_truthful": [],
+      "owner_fields": {
+        "owner_email": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "tfowler@pacmech.com"
+        },
+        "owner_name": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "Todd Fowler"
+        },
+        "owner_phone": {
+          "source": "sixtyfour",
+          "truthful": true,
+          "value": "+16143942324"
+        }
+      },
+      "state": "California",
+      "step_outcomes": [
+        {
+          "detail": null,
+          "elapsed": 0.8,
+          "field_sources": {
+            "address": "google_places",
+            "company": "google_places",
+            "company_phone": "google_places",
+            "google_maps_url": "google_places",
+            "google_place_id": "google_places",
+            "rating": "google_places",
+            "review_count": "google_places",
+            "website": "google_places"
+          },
+          "fields_filled": [
+            "company_phone",
+            "google_maps_url",
+            "google_place_id",
+            "company",
+            "website",
+            "address",
+            "review_count",
+            "rating"
+          ],
+          "step": "Google Places",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Lead already has a website, or no recovery providers configured.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Domain recovery",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 12.8,
+          "field_sources": {
+            "certifications": "direct",
+            "company_description": "direct",
+            "company_email": "direct",
+            "services_offered": "direct",
+            "year_established": "direct"
+          },
+          "fields_filled": [
+            "services_offered",
+            "company_email",
+            "company_description",
+            "certifications",
+            "year_established"
+          ],
+          "step": "Website scrape",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 3.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 4.4,
+          "field_sources": {
+            "key_staff": "hunter",
+            "owner_email": "hunter",
+            "owner_linkedin": "hunter",
+            "owner_name": "hunter"
+          },
+          "fields_filled": [
+            "owner_linkedin",
+            "owner_email",
+            "owner_name",
+            "key_staff"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 5.2,
+          "field_sources": {
+            "company_description": "apollo",
+            "company_phone": "apollo",
+            "employee_count": "apollo",
+            "facebook_url": "apollo",
+            "revenue_estimate": "apollo",
+            "services_offered": "apollo",
+            "year_established": "apollo"
+          },
+          "fields_filled": [
+            "employee_count",
+            "company_phone",
+            "services_offered",
+            "revenue_estimate",
+            "facebook_url",
+            "company_description",
+            "year_established"
+          ],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 14.5,
+          "field_sources": {
+            "owner_phone": "sixtyfour"
+          },
+          "fields_filled": [
+            "owner_phone"
+          ],
+          "step": "Sixtyfour",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Owner email follow-up skipped \u2014 truthful owner_email already filled",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Owner email follow-up",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No company email or phone available to reuse.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Company fallback",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Only low-value fields remained (review_summary, yelp_url); skipped to save tokens.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Claude failsafe",
+          "type": "enrich_step_skip"
+        }
+      ],
+      "tier": null,
+      "website": "http://pacmech.com/",
+      "why_missing": {}
+    },
+    {
+      "city": "North Hollywood",
+      "company": "Davis Wholesale Electric",
+      "lead_id": 4,
+      "missing_truthful": [
+        "owner_phone"
+      ],
+      "owner_fields": {
+        "owner_email": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "david@dwe.com"
+        },
+        "owner_name": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "David Williams-Ellis"
+        },
+        "owner_phone": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        }
+      },
+      "state": "California",
+      "step_outcomes": [
+        {
+          "detail": null,
+          "elapsed": 0.6,
+          "field_sources": {
+            "address": "google_places",
+            "company": "google_places",
+            "company_phone": "google_places",
+            "google_maps_url": "google_places",
+            "google_place_id": "google_places",
+            "rating": "google_places",
+            "review_count": "google_places",
+            "website": "google_places"
+          },
+          "fields_filled": [
+            "company_phone",
+            "google_maps_url",
+            "google_place_id",
+            "company",
+            "website",
+            "address",
+            "review_count",
+            "rating"
+          ],
+          "step": "Google Places",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Lead already has a website, or no recovery providers configured.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Domain recovery",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No website available to scrape, or no scraper fallback is configured.",
+          "elapsed": 6.9,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Website scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Step ran but produced no new fields.",
+          "elapsed": 3.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 4.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 9.2,
+          "field_sources": {
+            "key_staff": "hunter",
+            "owner_email": "hunter",
+            "owner_linkedin": "hunter",
+            "owner_name": "hunter"
+          },
+          "fields_filled": [
+            "owner_linkedin",
+            "owner_email",
+            "owner_name",
+            "key_staff"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Sixtyfour find-phone: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+          "elapsed": 0.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Sixtyfour",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Owner email follow-up skipped \u2014 truthful owner_email already filled",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Owner email follow-up",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No company email or phone available to reuse.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Company fallback",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 1.8,
+          "field_sources": {
+            "company_description": "claude_inferred",
+            "review_summary": "claude_inferred",
+            "services_offered": "claude_inferred"
+          },
+          "fields_filled": [
+            "company_description",
+            "services_offered",
+            "review_summary"
+          ],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "http://davisnoho.portalced.com/",
+      "why_missing": {
+        "owner_phone": "Sixtyfour errored: Sixtyfour find-phone: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run"
+      }
+    },
+    {
+      "city": "Los Angeles",
+      "company": "Raquel Confections Distributors",
+      "lead_id": 5,
+      "missing_truthful": [
+        "owner_phone"
+      ],
+      "owner_fields": {
+        "owner_email": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "cerasela.balzer@rcd.com"
+        },
+        "owner_name": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "Cerasela Balzer"
+        },
+        "owner_phone": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        }
+      },
+      "state": "California",
+      "step_outcomes": [
+        {
+          "detail": "No company/address data available for place matching, or no place match found.",
+          "elapsed": 0.4,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Places",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 17.0,
+          "field_sources": {
+            "website": "openmart"
+          },
+          "fields_filled": [
+            "website"
+          ],
+          "step": "Domain recovery",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 15.8,
+          "field_sources": {
+            "company_email": "direct",
+            "company_phone": "direct",
+            "facebook_url": "direct",
+            "services_offered": "direct"
+          },
+          "fields_filled": [
+            "facebook_url",
+            "company_email",
+            "company_phone",
+            "services_offered"
+          ],
+          "step": "Website scrape",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 3.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Step ran but produced no new fields.",
+          "elapsed": 4.3,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 9.1,
+          "field_sources": {
+            "key_staff": "hunter",
+            "owner_email": "hunter",
+            "owner_name": "hunter"
+          },
+          "fields_filled": [
+            "owner_email",
+            "key_staff",
+            "owner_name"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Sixtyfour find-phone: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+          "elapsed": 0.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Sixtyfour",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Owner email follow-up skipped \u2014 truthful owner_email already filled",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Owner email follow-up",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No company email or phone available to reuse.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Company fallback",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 1.7,
+          "field_sources": {
+            "company_description": "claude_inferred",
+            "employee_count": "claude_inferred"
+          },
+          "fields_filled": [
+            "employee_count",
+            "company_description"
+          ],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "https://goscac.com",
+      "why_missing": {
+        "owner_phone": "Sixtyfour errored: Sixtyfour find-phone: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run"
+      }
+    },
+    {
+      "city": "Los Angeles",
+      "company": "SeeBiz Inc.",
+      "lead_id": 6,
+      "missing_truthful": [
+        "owner_name",
+        "owner_phone"
+      ],
+      "owner_fields": {
+        "owner_email": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "contact@seebiz.com"
+        },
+        "owner_name": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        },
+        "owner_phone": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        }
+      },
+      "state": "California",
+      "step_outcomes": [
+        {
+          "detail": null,
+          "elapsed": 0.9,
+          "field_sources": {
+            "address": "google_places",
+            "company": "google_places",
+            "company_phone": "google_places",
+            "google_maps_url": "google_places",
+            "google_place_id": "google_places",
+            "rating": "google_places",
+            "review_count": "google_places",
+            "website": "google_places"
+          },
+          "fields_filled": [
+            "company_phone",
+            "google_maps_url",
+            "google_place_id",
+            "company",
+            "website",
+            "address",
+            "review_count",
+            "rating"
+          ],
+          "step": "Google Places",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Lead already has a website, or no recovery providers configured.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Domain recovery",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 9.8,
+          "field_sources": {
+            "company_description": "direct",
+            "company_email": "direct",
+            "services_offered": "direct",
+            "year_established": "direct"
+          },
+          "fields_filled": [
+            "company_email",
+            "company_description",
+            "year_established",
+            "services_offered"
+          ],
+          "step": "Website scrape",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 3.7,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Step ran but produced no new fields.",
+          "elapsed": 4.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 6.0,
+          "field_sources": {
+            "owner_email": "hunter"
+          },
+          "fields_filled": [
+            "owner_email"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Sixtyfour enrich-company: HTTPSConnectionPool(host='api.orthogonal.com', port=443): Read timed out. (read timeout=90)",
+          "elapsed": 90.1,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Sixtyfour",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Owner email follow-up skipped \u2014 truthful owner_email already filled",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Owner email follow-up",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No company email or phone available to reuse.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Company fallback",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 1.1,
+          "field_sources": {
+            "review_summary": "claude_inferred"
+          },
+          "fields_filled": [
+            "review_summary"
+          ],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "https://www.seebiz.com/",
+      "why_missing": {
+        "owner_name": "Sixtyfour errored: Sixtyfour enrich-company: HTTPSConnectionPool(host='api.orthogonal.com', port=443): Read timed out. (read timeout=90)",
+        "owner_phone": "Sixtyfour errored: Sixtyfour enrich-company: HTTPSConnectionPool(host='api.orthogonal.com', port=443): Read timed out. (read timeout=90)"
+      }
+    },
+    {
+      "city": "Irvine",
+      "company": "American Cleanstat LLC",
+      "lead_id": 7,
+      "missing_truthful": [
+        "owner_phone"
+      ],
+      "owner_fields": {
+        "owner_email": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "robin.carroll@thomassci.com"
+        },
+        "owner_name": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "Robin Carroll"
+        },
+        "owner_phone": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        }
+      },
+      "state": "California",
+      "step_outcomes": [
+        {
+          "detail": null,
+          "elapsed": 0.6,
+          "field_sources": {
+            "address": "google_places",
+            "company": "google_places",
+            "company_phone": "google_places",
+            "google_maps_url": "google_places",
+            "google_place_id": "google_places",
+            "website": "google_places"
+          },
+          "fields_filled": [
+            "company_phone",
+            "website",
+            "address",
+            "google_maps_url",
+            "google_place_id",
+            "company"
+          ],
+          "step": "Google Places",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Lead already has a website, or no recovery providers configured.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Domain recovery",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No website available to scrape, or no scraper fallback is configured.",
+          "elapsed": 4.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Website scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 3.8,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 4.6,
+          "field_sources": {
+            "company_description": "apollo",
+            "company_phone": "apollo",
+            "employee_count": "apollo",
+            "facebook_url": "apollo",
+            "revenue_estimate": "apollo",
+            "services_offered": "apollo",
+            "year_established": "apollo"
+          },
+          "fields_filled": [
+            "employee_count",
+            "company_phone",
+            "services_offered",
+            "revenue_estimate",
+            "facebook_url",
+            "company_description",
+            "year_established"
+          ],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 5.5,
+          "field_sources": {
+            "key_staff": "hunter",
+            "owner_email": "hunter",
+            "owner_linkedin": "hunter",
+            "owner_name": "hunter"
+          },
+          "fields_filled": [
+            "owner_linkedin",
+            "owner_email",
+            "owner_name",
+            "key_staff"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Sixtyfour find-phone: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+          "elapsed": 0.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Sixtyfour",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Owner email follow-up skipped \u2014 truthful owner_email already filled",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Owner email follow-up",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No company email or phone available to reuse.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Company fallback",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 1.1,
+          "field_sources": {
+            "certifications": "claude_inferred",
+            "review_summary": "claude_inferred"
+          },
+          "fields_filled": [
+            "review_summary",
+            "certifications"
+          ],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "https://thomassci.com/",
+      "why_missing": {
+        "owner_phone": "Sixtyfour errored: Sixtyfour find-phone: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run"
+      }
+    },
+    {
+      "city": "Los Angeles",
+      "company": "Elevated Equipment Supply",
+      "lead_id": 8,
+      "missing_truthful": [
+        "owner_phone"
+      ],
+      "owner_fields": {
+        "owner_email": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "john@elevatedequipmentsupply.com"
+        },
+        "owner_name": {
+          "source": "hunter",
+          "truthful": true,
+          "value": "John Canett"
+        },
+        "owner_phone": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        }
+      },
+      "state": "California",
+      "step_outcomes": [
+        {
+          "detail": "No company/address data available for place matching, or no place match found.",
+          "elapsed": 0.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Places",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 31.5,
+          "field_sources": {
+            "website": "openmart"
+          },
+          "fields_filled": [
+            "website"
+          ],
+          "step": "Domain recovery",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 6.3,
+          "field_sources": {
+            "company_description": "direct",
+            "company_email": "direct",
+            "company_phone": "direct",
+            "facebook_url": "direct",
+            "services_offered": "direct"
+          },
+          "fields_filled": [
+            "company_phone",
+            "services_offered",
+            "company_email",
+            "company_description",
+            "facebook_url"
+          ],
+          "step": "Website scrape",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 2.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 2.7,
+          "field_sources": {
+            "company_description": "apollo",
+            "company_phone": "apollo",
+            "employee_count": "apollo",
+            "services_offered": "apollo",
+            "year_established": "apollo"
+          },
+          "fields_filled": [
+            "employee_count",
+            "company_phone",
+            "services_offered",
+            "company_description",
+            "year_established"
+          ],
+          "step": "Apollo",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 3.0,
+          "field_sources": {
+            "key_staff": "hunter",
+            "owner_email": "hunter",
+            "owner_linkedin": "hunter",
+            "owner_name": "hunter"
+          },
+          "fields_filled": [
+            "owner_linkedin",
+            "owner_email",
+            "owner_name",
+            "key_staff"
+          ],
+          "step": "Hunter.io",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Sixtyfour find-phone: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+          "elapsed": 0.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Sixtyfour",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Owner email follow-up skipped \u2014 truthful owner_email already filled",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Owner email follow-up",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No company email or phone available to reuse.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Company fallback",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Step ran but produced no new fields.",
+          "elapsed": 0.9,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "http://elevatedequipmentsupply.com",
+      "why_missing": {
+        "owner_phone": "Sixtyfour errored: Sixtyfour find-phone: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run"
+      }
+    },
+    {
+      "city": "Chatsworth",
+      "company": "Exhart",
+      "lead_id": 9,
+      "missing_truthful": [
+        "owner_name",
+        "owner_email",
+        "owner_phone"
+      ],
+      "owner_fields": {
+        "owner_email": {
+          "source": "company_fallback",
+          "truthful": false,
+          "value": "support@exhart.com"
+        },
+        "owner_name": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        },
+        "owner_phone": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        }
+      },
+      "state": "California",
+      "step_outcomes": [
+        {
+          "detail": "No company/address data available for place matching, or no place match found.",
+          "elapsed": 0.4,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Places",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 2.5,
+          "field_sources": {
+            "website": "domain_guess"
+          },
+          "fields_filled": [
+            "website"
+          ],
+          "step": "Domain recovery",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 6.4,
+          "field_sources": {
+            "company_description": "direct",
+            "company_email": "direct",
+            "company_phone": "direct",
+            "services_offered": "direct"
+          },
+          "fields_filled": [
+            "company_email",
+            "company_phone",
+            "company_description",
+            "services_offered"
+          ],
+          "step": "Website scrape",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 0.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Hunter: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+          "elapsed": 0.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Hunter.io",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Apollo: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+          "elapsed": 0.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Apollo",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Sixtyfour enrich-company: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+          "elapsed": 0.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Sixtyfour",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Owner email follow-up skipped \u2014 no grounded owner or senior decision-maker name",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Owner email follow-up",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 0.0,
+          "field_sources": {
+            "owner_email": "company_fallback"
+          },
+          "fields_filled": [
+            "owner_email"
+          ],
+          "step": "Company fallback",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 1.3,
+          "field_sources": {
+            "facebook_url": "claude_inferred",
+            "review_summary": "claude_inferred",
+            "yelp_url": "claude_inferred"
+          },
+          "fields_filled": [
+            "facebook_url",
+            "yelp_url",
+            "review_summary"
+          ],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "https://www.exhart.com",
+      "why_missing": {
+        "owner_email": "owner_email exists but source 'company_fallback' is not counted as truthful owner contact.",
+        "owner_name": "Sixtyfour errored: Sixtyfour enrich-company: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+        "owner_phone": "Sixtyfour errored: Sixtyfour enrich-company: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run"
+      }
+    },
+    {
+      "city": "Irvine",
+      "company": "StorAmerica Management",
+      "lead_id": 10,
+      "missing_truthful": [
+        "owner_name",
+        "owner_email",
+        "owner_phone"
+      ],
+      "owner_fields": {
+        "owner_email": {
+          "source": "company_fallback",
+          "truthful": false,
+          "value": "acquisitions@storamericastorage.com"
+        },
+        "owner_name": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        },
+        "owner_phone": {
+          "source": "none",
+          "truthful": false,
+          "value": null
+        }
+      },
+      "state": "California",
+      "step_outcomes": [
+        {
+          "detail": null,
+          "elapsed": 0.6,
+          "field_sources": {
+            "address": "google_places",
+            "company": "google_places",
+            "company_phone": "google_places",
+            "google_maps_url": "google_places",
+            "google_place_id": "google_places",
+            "rating": "google_places",
+            "review_count": "google_places",
+            "website": "google_places"
+          },
+          "fields_filled": [
+            "company_phone",
+            "google_maps_url",
+            "google_place_id",
+            "company",
+            "website",
+            "address",
+            "review_count",
+            "rating"
+          ],
+          "step": "Google Places",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "No real Google place ID available.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Google Maps URL",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Lead already has a website, or no recovery providers configured.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Domain recovery",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 18.2,
+          "field_sources": {
+            "company_description": "direct",
+            "company_email": "direct",
+            "services_offered": "direct",
+            "year_established": "direct"
+          },
+          "fields_filled": [
+            "company_email",
+            "company_description",
+            "year_established",
+            "services_offered"
+          ],
+          "step": "Website scrape",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": "Hunter: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+          "elapsed": 0.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Hunter.io",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Apollo: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+          "elapsed": 0.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Apollo",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Openmart company enrich returned no owner contact",
+          "elapsed": 0.6,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Openmart company enrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Sixtyfour enrich-company: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+          "elapsed": 0.5,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Sixtyfour",
+          "type": "enrich_step_error"
+        },
+        {
+          "detail": "Owner email follow-up skipped \u2014 no grounded owner or senior decision-maker name",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Owner email follow-up",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "No FULLENRICH_API_KEY set, or all owner fields already filled.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "FullEnrich",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": "Review scrape disabled, or no review URL available to scrape.",
+          "elapsed": 0.0,
+          "field_sources": {},
+          "fields_filled": [],
+          "step": "Review scrape",
+          "type": "enrich_step_skip"
+        },
+        {
+          "detail": null,
+          "elapsed": 0.0,
+          "field_sources": {
+            "owner_email": "company_fallback"
+          },
+          "fields_filled": [
+            "owner_email"
+          ],
+          "step": "Company fallback",
+          "type": "enrich_step_done"
+        },
+        {
+          "detail": null,
+          "elapsed": 2.0,
+          "field_sources": {
+            "certifications": "claude_inferred",
+            "employee_count": "claude_inferred",
+            "facebook_url": "claude_inferred",
+            "review_summary": "claude_inferred",
+            "yelp_url": "claude_inferred"
+          },
+          "fields_filled": [
+            "employee_count",
+            "certifications",
+            "yelp_url",
+            "review_summary",
+            "facebook_url"
+          ],
+          "step": "Claude failsafe",
+          "type": "enrich_step_done"
+        }
+      ],
+      "tier": null,
+      "website": "http://storamericastorage.com/",
+      "why_missing": {
+        "owner_email": "owner_email exists but source 'company_fallback' is not counted as truthful owner contact.",
+        "owner_name": "Sixtyfour errored: Sixtyfour enrich-company: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run",
+        "owner_phone": "Sixtyfour errored: Sixtyfour enrich-company: 402 Client Error: Payment Required for url: https://api.orthogonal.com/v1/run"
+      }
+    }
+  ],
+  "limit": 10,
+  "mapping": {
+    "Address": "address",
+    "Employees": "employee_count",
+    "Industry": "industry",
+    "LinkedIn": "company_linkedin",
+    "Name": "company",
+    "Revenue": "revenue_estimate",
+    "Year Founded": "year_established"
+  },
+  "mode": "memory",
+  "remaining_count": 10,
+  "run_id": "memory-20260508T144539Z",
+  "status": "completed"
+}

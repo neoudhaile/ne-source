@@ -1,0 +1,33 @@
+{
+  "captured_at": "2026-05-07T20:46:30.315112+00:00",
+  "cleanup": {
+    "deleted_leads": 0,
+    "deleted_runs": 0,
+    "run_ids": []
+  },
+  "csv": "/Users/neoudhaile/Desktop/simple tier/short.csv",
+  "error_message": null,
+  "event_counts": {},
+  "fields": {
+    "owner_email": {},
+    "owner_name": {},
+    "owner_phone": {}
+  },
+  "inserted_count": 0,
+  "kept_count": 0,
+  "label": "owner-contact-short-3-stage-phone",
+  "limit": 3,
+  "mapping": {
+    "Address": "address",
+    "Employees": "employee_count",
+    "Industry": "industry",
+    "LinkedIn": "company_linkedin",
+    "Name": "company",
+    "Revenue": "revenue_estimate",
+    "Year Founded": "year_established"
+  },
+  "mode": "cleanup",
+  "remaining_count": 0,
+  "run_id": "cleanup-only",
+  "status": "completed"
+}

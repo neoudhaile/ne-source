@@ -70,12 +70,59 @@ def _industry_select_name(value: str | None) -> str | None:
     return 'Other'
 
 
+def _parse_meta(meta) -> dict:
+    if isinstance(meta, dict):
+        return meta
+    if isinstance(meta, str):
+        try:
+            parsed = json.loads(meta)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
+
+
+OWNER_SOURCE_FIELDS = ('owner_name', 'owner_email', 'owner_phone', 'owner_linkedin')
+NON_TRUTHFUL_OWNER_EMAIL_SOURCES = {'company_fallback', 'claude_inferred', 'csv_import'}
+
+
+def _owner_sources_text(meta: dict) -> str:
+    parts = []
+    for field in OWNER_SOURCE_FIELDS:
+        entry = meta.get(field) or {}
+        if not isinstance(entry, dict):
+            continue
+        source = entry.get('provider') or entry.get('source')
+        if not source:
+            continue
+        label = field.replace('owner_', '')
+        parts.append(f'{label}: {source}')
+    return ' · '.join(parts)
+
+
+def _notes_text(lead: dict, meta: dict) -> str:
+    notes = []
+    email_meta = meta.get('owner_email') or {}
+    email_source = (email_meta.get('source') if isinstance(email_meta, dict) else None) or ''
+    if lead.get('owner_email') and email_source in NON_TRUTHFUL_OWNER_EMAIL_SOURCES:
+        notes.append(f'owner_email is {email_source} (company-level, not verified owner email)')
+    if not lead.get('owner_name'):
+        notes.append('owner_name missing')
+    if not lead.get('owner_email'):
+        notes.append('owner_email missing')
+    if not lead.get('owner_phone'):
+        notes.append('owner_phone missing')
+    return '; '.join(notes)
+
+
 def _lead_to_notion_properties(lead: dict) -> dict:
     """Map a lead dict to Notion database page properties."""
     company = _truncate(lead.get('company') or 'Unknown')
     props = {
         'Company': {'title': [{'text': {'content': company}}]},
     }
+
+    meta = _parse_meta(lead.get('enrichment_meta'))
 
     text_map = {
         'owner_name': 'Owner Name',
@@ -102,6 +149,22 @@ def _lead_to_notion_properties(lead: dict) -> dict:
     owner_phone = lead.get('owner_phone')
     if owner_phone:
         props['Owner Phone'] = {'phone_number': str(owner_phone)}
+
+    company_email = lead.get('company_email')
+    if company_email:
+        props['Company Email'] = {'email': str(company_email)}
+
+    company_phone = lead.get('company_phone')
+    if company_phone:
+        props['Company Phone'] = {'phone_number': str(company_phone)}
+
+    owner_sources = _owner_sources_text(meta)
+    if owner_sources:
+        props['Owner Sources'] = _rich_text(owner_sources)
+
+    notes = _notes_text(lead, meta)
+    if notes:
+        props['Notes'] = _rich_text(notes)
 
     url_map = {
         'website': 'Website',

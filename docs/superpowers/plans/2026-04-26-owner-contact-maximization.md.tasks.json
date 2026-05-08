@@ -1,0 +1,101 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-26-owner-contact-maximization.md",
+  "lastUpdated": "2026-05-08T14:32:36Z",
+  "statusLegend": {
+    "completed": "Implemented and verified locally or by benchmark.",
+    "in_progress": "Current active work.",
+    "pending": "Not started or needs another benchmark/fix loop."
+  },
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Add repeatable no-DB owner-contact benchmark harness",
+      "status": "completed",
+      "notes": "scripts/owner_contact_benchmark.py runs CSV subsets in memory, writes benchmark JSON, and avoids Postgres/Notion writes."
+    },
+    {
+      "id": 2,
+      "title": "Migrate paid enrichment calls to Orthogonal Run API with x402 fallback",
+      "status": "completed",
+      "notes": "pipeline/orthogonal.py centralizes Run API calls. Query params are stringified for Orthogonal. 4xx/timeouts are no longer masked by empty x402 fallback."
+    },
+    {
+      "id": 3,
+      "title": "Improve owner-name coverage with website/domain recovery and leadership-page scrape",
+      "status": "completed",
+      "notes": "Domain recovery, linked leadership-page discovery, public-agency senior decision-maker handling, and person-match guards are in place."
+    },
+    {
+      "id": 4,
+      "title": "Add Sixtyfour owner-phone path",
+      "status": "completed",
+      "notes": "Sixtyfour /find-phone runs after owner identity is known; /enrich-company can find senior decision makers when no person exists, but it is slower and should remain benchmarked carefully."
+    },
+    {
+      "id": 5,
+      "title": "Add per-lead benchmark diagnostics",
+      "status": "completed",
+      "notes": "Benchmark JSON now includes lead_diagnostics with missing_truthful, why_missing, and step_outcomes."
+    },
+    {
+      "id": 6,
+      "title": "Fix CSV address parsing for wholesale CSV shape",
+      "status": "completed",
+      "notes": "Addresses shaped as street, city, state, country, zip now preserve zipcode. Verified by tests/test_csv_import_guards.py."
+    },
+    {
+      "id": 7,
+      "title": "Clean and organize planning docs",
+      "status": "completed",
+      "notes": "Archived completed/superseded docs and stale benchmark JSONs under docs/archive/2026-05-08-doc-cleanup. Current owner-contact plan and benchmark summary are the active source of truth."
+    },
+    {
+      "id": 8,
+      "title": "Improve domain recovery for any row with no verified website",
+      "status": "completed",
+      "notes": "Implemented generic domain recovery improvements: full location/ZIP query context, cleaned LinkedIn company slug terms, bare-domain normalization, conservative verified domain guesses, and rejected-candidate diagnostics. Verified with tests/test_domain_recovery.py (14 passed). 5-row wholesale benchmark recovered a website/domain for the prior no-domain row and improved owner_name to 5/5."
+    },
+    {
+      "id": 9,
+      "title": "Improve owner-email follow-up for any verified person + domain with no truthful owner email",
+      "status": "completed",
+      "notes": "Implemented a generic owner-email follow-up stage for grounded owner/senior decision-maker + verified domain rows where owner_email is empty or company_fallback only. It tries Hunter email-finder first, then Sixtyfour /find-email, preserves company_fallback as non-truthful, and emits skip/no-result diagnostics. Verified with focused suite (45 passed)."
+    },
+    {
+      "id": 10,
+      "title": "Improve phone fallback for any grounded owner row where current providers return no phone",
+      "status": "pending",
+      "notes": "General case: owner/senior decision-maker name and domain/email exist, but owner_phone is empty after Apollo, Hunter, and Sixtyfour. Regression example only: KWI. Do not use company_phone as owner_phone; any new strategy must be source-attributed and benchmarked."
+    },
+    {
+      "id": 11,
+      "title": "Make Notion export call-ready for any enriched lead",
+      "status": "pending",
+      "notes": "Add/verify owner title, owner-field sources, confidence/missing reason, and company-vs-owner contact distinction in Notion payload. This should apply generically to search and CSV leads."
+    },
+    {
+      "id": 12,
+      "title": "Scale benchmarks beyond tiny slices",
+      "status": "in_progress",
+      "notes": "5-row wholesale memory benchmark improved to owner_name 5/5, owner_email 4/5, owner_phone 4/5. Ask explicit approval before running the 10-row wholesale benchmark because it sends new CSV rows to external enrichment providers."
+    }
+  ],
+  "latestBenchmarks": [
+    {
+      "label": "owner-contact-short-3-person-match-guard-memory",
+      "csv": "/Users/neoudhaile/Desktop/simple tier/short.csv",
+      "output": "docs/superpowers/plans/benchmarks/20260508T134036Z-owner-contact-short-3-person-match-guard-memory-run-memory-20260508T133816Z.json",
+      "owner_name_truthful": "3/3",
+      "owner_email_truthful": "3/3",
+      "owner_phone_truthful": "2/3"
+    },
+    {
+      "label": "owner-contact-wholesale-short-5-next-memory",
+      "csv": "/Users/neoudhaile/Desktop/simple tier/Wholesale_Distribution_short.csv",
+      "output": "docs/superpowers/plans/benchmarks/20260508T143236Z-owner-contact-wholesale-short-5-next-memory-run-memory-20260508T142729Z.json",
+      "owner_name_truthful": "5/5",
+      "owner_email_truthful": "4/5",
+      "owner_phone_truthful": "4/5"
+    }
+  ]
+}

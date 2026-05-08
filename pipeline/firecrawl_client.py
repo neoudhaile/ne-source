@@ -25,6 +25,16 @@ DEFAULT_HEADERS = {
     ),
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
+LINK_DISCOVERY_KEYWORDS = (
+    'about',
+    'team',
+    'leadership',
+    'management',
+    'executive',
+    'staff',
+    'directory',
+    'contact',
+)
 
 
 def has_api_key() -> bool:
@@ -34,7 +44,19 @@ def has_api_key() -> bool:
 def candidate_urls(website: str) -> list[str]:
     parsed = urlparse(website)
     base = f'{parsed.scheme}://{parsed.netloc}'
-    paths = ['', '/', '/contact', '/contact-us', '/about', '/about-us', '/team']
+    paths = [
+        '',
+        '/',
+        '/about',
+        '/about-us',
+        '/team',
+        '/leadership',
+        '/management',
+        '/staff',
+        '/directory',
+        '/contact',
+        '/contact-us',
+    ]
     urls = []
     seen = set()
     for path in paths:
@@ -64,6 +86,29 @@ def _extract_title(html: str) -> str | None:
     if not match:
         return None
     return re.sub(r'\s+', ' ', unescape(match.group(1))).strip()
+
+
+def _extract_relevant_links(html: str, base_url: str) -> list[str]:
+    links = []
+    seen = set()
+    for match in re.finditer(r'(?is)<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', html):
+        href = unescape(match.group(1)).strip()
+        if not href or href.startswith(('#', 'mailto:', 'tel:', 'javascript:')):
+            continue
+        text = _clean_html(match.group(2)).lower()
+        absolute = urljoin(base_url, href)
+        parsed_base = urlparse(base_url)
+        parsed_link = urlparse(absolute)
+        if parsed_link.netloc and parsed_link.netloc != parsed_base.netloc:
+            continue
+        haystack = f'{href} {text}'.lower()
+        if not any(keyword in haystack for keyword in LINK_DISCOVERY_KEYWORDS):
+            continue
+        normalized = absolute.split('#', 1)[0]
+        if normalized not in seen:
+            seen.add(normalized)
+            links.append(normalized)
+    return links[:12]
 
 
 def _fallback_reason(status_code: int | None, title: str | None, text: str) -> str | None:
@@ -108,6 +153,7 @@ def _direct_fetch(url: str) -> tuple[dict | None, str | None]:
             'status_code': response.status_code,
             'content_type': content_type,
             'title': title,
+            'links': _extract_relevant_links(html, response.url),
         },
         'provider_used': 'direct',
     }, None
@@ -146,6 +192,7 @@ def _zyte_fetch(url: str, fallback_reason: str | None = None) -> dict:
         'metadata': {
             'title': title,
             'fallback_reason': fallback_reason,
+            'links': _extract_relevant_links(body, url),
         },
         'provider_used': 'direct_then_zyte' if fallback_reason else 'zyte',
         'fallback_reason': fallback_reason,
@@ -161,9 +208,16 @@ def scrape_url(url: str) -> dict:
     return _zyte_fetch(url, fallback_reason=reason)
 
 
-def scrape_site_pages(website: str, max_pages: int = 4) -> list[dict]:
+def scrape_site_pages(website: str, max_pages: int = 8) -> list[dict]:
     pages = []
-    for url in candidate_urls(website)[:max_pages]:
+    queue = candidate_urls(website)
+    seen = set()
+    while queue and len(pages) < max_pages:
+        url = queue.pop(0)
+        normalized_url = url.rstrip('/') or url
+        if normalized_url in seen:
+            continue
+        seen.add(normalized_url)
         try:
             data = scrape_url(url)
         except Exception:
@@ -171,11 +225,18 @@ def scrape_site_pages(website: str, max_pages: int = 4) -> list[dict]:
         markdown = data.get('markdown') or data.get('content') or ''
         if not markdown:
             continue
+        metadata = data.get('metadata') or {}
         pages.append({
             'url': data.get('url') or url,
             'markdown': markdown,
-            'metadata': data.get('metadata') or {},
+            'metadata': metadata,
             'provider_used': data.get('provider_used'),
             'fallback_reason': data.get('fallback_reason'),
         })
+        discovered = []
+        for link in metadata.get('links') or []:
+            normalized_link = link.rstrip('/') or link
+            if normalized_link not in seen and link not in queue:
+                discovered.append(link)
+        queue = discovered + queue
     return pages

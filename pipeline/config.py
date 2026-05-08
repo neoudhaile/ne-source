@@ -38,6 +38,13 @@ GEO_RADIUS_MILES = 40
 ENABLE_NOTION_EXPORT = True
 NOTION_DATABASE_ID = ''
 
+# Owner-contact benchmark / CSV enrichment domain recovery
+ENABLE_DOMAIN_RECOVERY = True
+ENABLE_OPENMART_DOMAIN_RECOVERY = True
+ENABLE_OPENMART_COMPANY_ENRICH = True
+DOMAIN_RECOVERY_TIMEOUT = 15
+DOMAIN_VERIFICATION_MIN_TOKEN_OVERLAP = 1
+
 TARGET_CITIES = {
     'los angeles', 'long beach', 'pasadena', 'burbank', 'glendale',
     'torrance', 'santa monica', 'anaheim', 'compton', 'inglewood',
